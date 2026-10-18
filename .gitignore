@@ -1,0 +1,11 @@
+.gradle/
+build/
+out/
+run/
+.idea/
+*.iml
+.vscode/
+bin/
+
+# original jar (published as a release asset, not in git)
+/Anubis Beta 0.9.9.1.jar

@@ -1,0 +1,96 @@
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	mavenCentral()
+}
+
+loom {
+	mixin {
+		// The original jar was built with static mixin remapping (no refmap).
+		useLegacyMixinAp = false
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+
+	// Sources were remapped from intermediary to these Yarn names.
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	// Exact Fabric API module versions that were bundled in the original jar.
+	[
+		'fabric-api-base:1.0.5+4ebb5c083e',
+		'fabric-key-binding-api-v1:1.1.7+4fc5413f3e',
+		'fabric-lifecycle-events-v1:2.6.15+4ebb5c083e',
+		'fabric-rendering-fluids-v1:3.1.43+4ebb5c083e',
+		'fabric-resource-loader-v0:3.3.4+4fc5413f3e',
+		'fabric-resource-loader-v1:1.0.10+78c8b4663e',
+		'fabric-screen-api-v1:3.1.7+4ebb5c083e',
+	].each {
+		modImplementation("net.fabricmc.fabric-api:${it}") { transitive = false }
+		include "net.fabricmc.fabric-api:${it}"
+	}
+
+	// Not bundled in the original jar, but its code touches members only this module widens
+	// (MinecraftClient.attackCooldown, RenderLayer.of, RenderPipelines snippets), so players
+	// need Fabric API installed. Versions are from Fabric API 0.141.6+1.21.11, which matches
+	// the bundled modules above.
+	modImplementation('net.fabricmc.fabric-api:fabric-transitive-access-wideners-v1:7.1.0+014c8cec3e') { transitive = false }
+
+	// Compile-only for the optional Indigo mixin (anubis.indigo.mixins.json, "required": false).
+	modCompileOnly('net.fabricmc.fabric-api:fabric-renderer-indigo:5.0.3+f4ffd2e53e') { transitive = false }
+	modCompileOnly('net.fabricmc.fabric-api:fabric-renderer-api-v1:8.0.3+f4ffd2e53e') { transitive = false }
+
+	// Dear ImGui bindings. LWJGL itself is provided by Minecraft.
+	[
+		'imgui-java-binding',
+		'imgui-java-lwjgl3',
+		'imgui-java-natives-windows',
+		'imgui-java-natives-linux',
+		'imgui-java-natives-macos',
+	].each {
+		implementation("io.github.spair:${it}:${project.imgui_version}") { transitive = false }
+		include "io.github.spair:${it}:${project.imgui_version}"
+	}
+
+	// SOCKS/HTTP proxy support. Netty core is provided by Minecraft.
+	['netty-codec-socks', 'netty-handler-proxy'].each {
+		implementation("io.netty:${it}:${project.netty_version}") { transitive = false }
+		include "io.netty:${it}:${project.netty_version}"
+	}
+}
+
+processResources {
+	inputs.property 'version', project.version
+
+	filesMatching('fabric.mod.json') {
+		expand 'version': project.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+	it.options.encoding = 'UTF-8'
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	from('LICENSE') {
+		rename { "${it}_${project.archives_base_name}" }
+	}
+}

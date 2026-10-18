@@ -1,0 +1,453 @@
+{
+  "presets": [
+    {
+      "anubisProfile": 2,
+      "name": "Horus",
+      "data": {
+        "modules": {
+          "version": 3,
+          "modules": {
+            "autototem": {
+              "enabled": true
+            },
+            "crystal-optimizer": {
+              "enabled": true
+            },
+            "friend-guard": {
+              "enabled": true
+            },
+            "auto-reconnect": {
+              "enabled": true
+            },
+            "anti-vanish": {
+              "enabled": true
+            },
+            "staff-list": {
+              "enabled": true
+            },
+            "player-bypass": {
+              "enabled": true
+            },
+            "player-bypass-2": {
+              "enabled": true
+            },
+            "netherite-finder": {
+              "enabled": true
+            },
+            "trident-util": {
+              "enabled": true
+            },
+            "donut-nofall": {
+              "enabled": true
+            },
+            "amethyst-bypass": {
+              "enabled": true
+            },
+            "freecam": {
+              "keybind": 85,
+              "settings": {
+                "keep-walking": false
+              }
+            },
+            "weather-notifier": {
+              "enabled": true
+            },
+            "swing-animation": {
+              "enabled": true
+            },
+            "weapon-inspect": {
+              "enabled": true
+            },
+            "hand-pose": {
+              "enabled": true
+            },
+            "hand-aura": {
+              "enabled": true
+            },
+            "spawner-notifier": {
+              "enabled": true
+            },
+            "sus-chunk-finder": {
+              "enabled": true,
+              "settings": {
+                "chunk-color": "60FF0404"
+              }
+            },
+            "chunk-scanner": {
+              "enabled": true,
+              "settingsVersion": 1
+            },
+            "block-entity-debug": {
+              "enabled": true,
+              "keybind": 46,
+              "settings": {
+                "block-colors": {
+                  "changes": {}
+                }
+              },
+              "settingsVersion": 1
+            },
+            "fullbright": {
+              "enabled": true
+            },
+            "glow-esp": {
+              "enabled": true
+            },
+            "nametags": {
+              "enabled": true
+            },
+            "spawner-nametags": {
+              "enabled": true
+            },
+            "block-overlay": {
+              "enabled": true
+            },
+            "freelook": {
+              "keybind": 96
+            },
+            "xray": {
+              "keybind": 88,
+              "settings": {
+                "blocks": {
+                  "changes": {}
+                }
+              }
+            },
+            "custom-fov": {
+              "enabled": true
+            },
+            "zoom": {
+              "keybind": 67,
+              "holdMode": true
+            },
+            "custom-crosshair": {
+              "enabled": true
+            },
+            "custom-glint": {
+              "enabled": true
+            },
+            "hit-particles": {
+              "enabled": true
+            },
+            "target-esp": {
+              "enabled": true
+            },
+            "totem-spirit": {
+              "enabled": true
+            },
+            "particles": {
+              "enabled": true
+            },
+            "motion-blur": {
+              "enabled": true
+            },
+            "atmosphere": {
+              "enabled": true
+            },
+            "color-grading": {
+              "enabled": true
+            },
+            "jump-circles": {
+              "enabled": true
+            },
+            "character-3d": {
+              "enabled": true
+            },
+            "floating-relics": {
+              "enabled": true
+            },
+            "hud": {
+              "enabled": true,
+              "settings": {
+                "coordinates": false,
+                "nether-coordinates": false,
+                "module-list": false
+              }
+            },
+            "spotify-hud": {
+              "enabled": true
+            },
+            "region-map": {
+              "enabled": true
+            },
+            "radar": {
+              "enabled": true
+            },
+            "hotkeys": {
+              "enabled": true
+            },
+            "discord-presence": {
+              "enabled": true
+            },
+            "easy-place": {
+              "enabled": true,
+              "settings": {
+                "toggle-message": false,
+                "baritone-walk": true,
+                "chat-feedback": false
+              }
+            }
+          }
+        },
+        "hud": {
+          "layout": {
+            "version": 11,
+            "elements": [
+              {
+                "id": "info_bar",
+                "x": 828.5,
+                "y": 21.5,
+                "width": 279,
+                "height": 31,
+                "visible": true,
+                "scale": 1.1500016,
+                "anchorX": 1,
+                "anchorBottom": false,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "coordinates",
+                "x": 10,
+                "y": 10,
+                "width": 59,
+                "height": 1,
+                "visible": true,
+                "scale": 1,
+                "anchorX": 0,
+                "anchorBottom": false,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "module_list",
+                "x": 1841,
+                "y": 588,
+                "width": 79,
+                "height": 421,
+                "visible": true,
+                "scale": 0.5999999,
+                "anchorX": 2,
+                "anchorBottom": true,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "potion_tracker",
+                "x": 1713,
+                "y": 978,
+                "width": 207,
+                "height": 21,
+                "visible": true,
+                "scale": 1,
+                "anchorX": 2,
+                "anchorBottom": true,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "region_map",
+                "x": 10,
+                "y": 21.5,
+                "width": 211,
+                "height": 329,
+                "visible": true,
+                "scale": 0.9499999,
+                "anchorX": 0,
+                "anchorBottom": false,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "anti_vanish",
+                "x": 959.5,
+                "y": 43,
+                "width": 1,
+                "height": 21,
+                "visible": true,
+                "scale": 1,
+                "anchorX": 1,
+                "anchorBottom": false,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "staff_list",
+                "x": 1788,
+                "y": 43,
+                "width": 123,
+                "height": 82,
+                "visible": true,
+                "scale": 0.99999994,
+                "anchorX": 2,
+                "anchorBottom": false,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "spotify",
+                "x": 1540,
+                "y": 812,
+                "width": 361,
+                "height": 152,
+                "visible": true,
+                "scale": 1.0999999,
+                "anchorX": 2,
+                "anchorBottom": true,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "hotkeys",
+                "x": 1788,
+                "y": 218,
+                "width": 132,
+                "height": 99,
+                "visible": true,
+                "scale": 0.79999995,
+                "anchorX": 2,
+                "anchorBottom": false,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "radar",
+                "x": 238,
+                "y": 21.5,
+                "width": 135,
+                "height": 135,
+                "visible": true,
+                "scale": 0.9499999,
+                "anchorX": 0,
+                "anchorBottom": false,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "target_card",
+                "x": 1804,
+                "y": 735,
+                "width": 1,
+                "height": 59,
+                "visible": true,
+                "scale": 1,
+                "anchorX": 2,
+                "anchorBottom": true,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "armor_status",
+                "x": 1154,
+                "y": 972,
+                "width": 90,
+                "height": 33,
+                "visible": true,
+                "scale": 1,
+                "anchorX": 2,
+                "anchorBottom": true,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              },
+              {
+                "id": "item_cooldowns",
+                "x": 959.5,
+                "y": 805,
+                "width": 1,
+                "height": 51,
+                "visible": true,
+                "scale": 1,
+                "anchorX": 1,
+                "anchorBottom": true,
+                "refScreenW": 1920,
+                "refScreenH": 1009,
+                "autoPlaced": false,
+                "placedGuiScale": 0,
+                "placedUiScale": 0
+              }
+            ]
+          },
+          "theme": {
+            "corner-radius": 4,
+            "hud_info_bar.opacity": 0.2,
+            "hud_info_bar.background": "Flow",
+            "hud_coordinates.opacity": 0.2,
+            "hud_potions.opacity": 0.2,
+            "hud_region_map.color": {
+              "r": 0,
+              "g": 0,
+              "b": 0,
+              "a": 0
+            },
+            "hud_region_map.opacity": 0.2,
+            "hud_region_map.background": "Flow",
+            "hud_region_map.line-opacity": 1,
+            "hud_staff_list.opacity": 0.2,
+            "hud_staff_list.background": "Flow",
+            "hud_spotify.opacity": 0.4,
+            "hud_spotify.background": "Rings",
+            "hud_spotify.image-opacity": 0.5,
+            "hud_spotify.image-x": 0.7,
+            "hud_spotify.image-focus": 0.6,
+            "hud_spotify.line-opacity": 0.15,
+            "hud_hotkeys.opacity": 0.44,
+            "hud_hotkeys.background": "Flow",
+            "hud_hotkeys.line-opacity": 0.85,
+            "hud_radar.opacity": 0.5,
+            "hud_radar.background": "Flow",
+            "hud_radar.line-opacity": 1
+          }
+        },
+        "theme": {
+          "panels.image-opacity": 1,
+          "panels.image-scale": 1.1,
+          "panels.image-focus": 0,
+          "cards.background": "Image",
+          "cards.header-height": 157,
+          "cards.image-opacity": 1,
+          "cards.image-scale": 1.1,
+          "cards.image-x": 0.6,
+          "cards.image-focus": 0.55,
+          "tabbar.image-x": 0.4,
+          "tabbar.image-focus": 0.85
+        }
+      }
+    }
+  ]
+}
