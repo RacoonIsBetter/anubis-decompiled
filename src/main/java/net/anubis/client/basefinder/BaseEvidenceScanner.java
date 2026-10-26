@@ -5,6 +5,7 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.block.AbstractSkullBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -32,6 +33,8 @@ public final class BaseEvidenceScanner {
    private static final int GRID_MAX_Y = 72;
    private static final int SHAFT_MIN_HEIGHT = 10;
    private static final int LONG_DRIPSTONE = 8;
+   /** Side of the square floor a dug-out room must have, all at one floor and one ceiling height. */
+   private static final int ROOM_SIZE = 5;
    /** A surface block only counts as part of a build when it sits in a straight line of this many. */
    private static final int SURFACE_LINE = 3;
    /** Below this many lined-up surface blocks, a chunk's surface is treated as scattered junk. */
@@ -67,7 +70,10 @@ public final class BaseEvidenceScanner {
    private static final byte SURFACE_BUILD = 23;
    private static final byte STORAGE_SURFACE = 24;
    private static final byte UTILITY_SURFACE = 25;
-   private static final byte CATEGORY_COUNT = 26;
+   private static final byte SIGN = 26;
+   private static final byte PORTAL = 27;
+   private static final byte FARMLAND = 28;
+   private static final byte CATEGORY_COUNT = 29;
 
    private final Map<Block, Byte> categories = new IdentityHashMap<>();
    private final int[] surface = new int[256];
@@ -171,7 +177,8 @@ public final class BaseEvidenceScanner {
                      }
                      case MARK_STRONGHOLD, MARK_ANCIENT_CITY, MARK_TRIAL, MARK_RUINED_PORTAL, MARK_MONUMENT, MARK_SPAWNER,
                         MARK_MOSSY_COBBLE -> this.note(category, pos);
-                     case STORAGE_BURIED, CHEST, UTILITY_BURIED, REDSTONE, LIGHT, BUILDING, OBSIDIAN -> {
+                     case SIGN, PORTAL -> this.note(category, pos);
+                     case STORAGE_BURIED, CHEST, UTILITY_BURIED, REDSTONE, LIGHT, BUILDING, OBSIDIAN, FARMLAND -> {
                         if (buried) {
                            this.note(category, pos);
                         }
@@ -236,9 +243,18 @@ public final class BaseEvidenceScanner {
 
       if (wantGrid) {
          this.scanTunnels(report, baseX, baseZ, gridMin, gridHeight, options.tunnelLength());
+         if (!this.structure()) {
+            this.scanRooms(report, baseX, baseZ, gridMin, gridHeight);
+         }
       }
 
       return report.isEmpty() ? null : report;
+   }
+
+   /** Strongholds, ancient cities, trial chambers, dungeons and monuments have flat rooms and decorations of their own. */
+   private boolean structure() {
+      return this.found[MARK_STRONGHOLD] > 0 || this.found[MARK_ANCIENT_CITY] > 0 || this.found[MARK_TRIAL] > 0 || this.found[MARK_MONUMENT] > 0
+         || this.found[MARK_SPAWNER] > 0 && this.found[MARK_MOSSY_COBBLE] > 0;
    }
 
    private void scoreBlocks(ChunkReport report, boolean ocean) {
@@ -272,6 +288,16 @@ public final class BaseEvidenceScanner {
       }
 
       this.give(report, Signal.UTILITY, UTILITY_ANY);
+      if (!this.structure()) {
+         this.give(report, Signal.SIGNS, SIGN);
+      }
+
+      // Ruined portals are never lit: a lit portal was lit by a player.
+      if (this.found[PORTAL] > 0) {
+         report.add(Signal.NETHER_PORTAL, 1, this.firstAt[PORTAL]);
+      }
+
+      this.give(report, Signal.FARM, FARMLAND);
       if (!ancientCity && !trial) {
          this.give(report, Signal.REDSTONE, REDSTONE);
       }
@@ -379,6 +405,63 @@ public final class BaseEvidenceScanner {
       }
    }
 
+   /**
+    * Deep rooms with a flat solid floor and a flat solid ceiling over at least a 5x5 area. Caves are
+    * never that even; players clearing out a base are.
+    */
+   private void scanRooms(ChunkReport report, int baseX, int baseZ, int gridMin, int height) {
+      boolean[] used = new boolean[256];
+
+      for (int y = 1; y + 4 < height; y++) {
+         Arrays.fill(used, false);
+
+         for (int z0 = 0; z0 + ROOM_SIZE <= 16; z0++) {
+            for (int x0 = 0; x0 + ROOM_SIZE <= 16; x0++) {
+               if (this.room(x0, y, z0, gridMin, used)) {
+                  for (int dz = 0; dz < ROOM_SIZE; dz++) {
+                     for (int dx = 0; dx < ROOM_SIZE; dx++) {
+                        used[z0 + dz << 4 | x0 + dx] = true;
+                     }
+                  }
+
+                  report.add(Signal.ROOM, 1, BlockPos.asLong(baseX + x0 + ROOM_SIZE / 2, gridMin + y, baseZ + z0 + ROOM_SIZE / 2));
+               }
+            }
+         }
+      }
+   }
+
+   private boolean room(int x0, int y, int z0, int gridMin, boolean[] used) {
+      int ceiling = -1;
+
+      for (int dz = 0; dz < ROOM_SIZE; dz++) {
+         for (int dx = 0; dx < ROOM_SIZE; dx++) {
+            int x = x0 + dx;
+            int z = z0 + dz;
+            if (used[z << 4 | x] || gridMin + y + 1 > this.surface[z << 4 | x] - TUNNEL_DEPTH) {
+               return false;
+            }
+
+            if (this.at(x, y - 1, z) != SOLID || this.at(x, y, z) != AIR || this.at(x, y + 1, z) != AIR) {
+               return false;
+            }
+
+            int top = y + 2;
+            while (top < y + 4 && this.at(x, top, z) == AIR) {
+               top++;
+            }
+
+            if (this.at(x, top, z) != SOLID || ceiling >= 0 && top != ceiling) {
+               return false;
+            }
+
+            ceiling = top;
+         }
+      }
+
+      return true;
+   }
+
    private boolean corridor(int x, int y, int z, boolean alongX, int gridMin) {
       if (gridMin + y + 1 > this.surface[z << 4 | x] - TUNNEL_DEPTH) {
          return false;
@@ -431,6 +514,12 @@ public final class BaseEvidenceScanner {
       BlockState state = block.getDefaultState();
       if (block == Blocks.DEEPSLATE) {
          return DEEPSLATE;
+      } else if (state.isIn(BlockTags.ALL_SIGNS) || state.isIn(BlockTags.BANNERS) || block instanceof AbstractSkullBlock) {
+         return SIGN;
+      } else if (block == Blocks.NETHER_PORTAL) {
+         return PORTAL;
+      } else if (block == Blocks.FARMLAND || state.isIn(BlockTags.CROPS)) {
+         return FARMLAND;
       } else if (state.isIn(BlockTags.SHULKER_BOXES) || block == Blocks.ENDER_CHEST) {
          return STORAGE_ANY;
       } else if (block == Blocks.BARREL) {

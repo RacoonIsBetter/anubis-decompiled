@@ -13,10 +13,17 @@ public enum Signal {
    PLAYER("Player underground", 0.70F, 1, Group.PLAYERS),
    HIDDEN_PLAYER("Hidden player activity", 0.65F, 1, Group.PLAYERS),
    STORAGE("Player storage", 0.60F, 3, Group.BLOCKS),
+   PLACED_ENTITIES("Item frames / armor stands", 0.60F, 2, Group.ENTITIES),
+   PETS("Pets / named mobs", 0.55F, 1, Group.ENTITIES),
    ROTATED_DEEPSLATE("Rotated deepslate", 0.55F, 3, Group.BLOCKS),
    TUNNEL("Hand-mined tunnel", 0.50F, 2, Group.TUNNELS),
+   ROOM("Dug-out room", 0.50F, 2, Group.TUNNELS),
+   SIGNS("Signs / banners / heads", 0.50F, 2, Group.BLOCKS),
    UTILITY("Crafted blocks", 0.45F, 3, Group.BLOCKS),
    SURFACE_BUILD("Surface build", 0.45F, 24, Group.BLOCKS),
+   NETHER_PORTAL("Lit nether portal", 0.45F, 1, Group.BLOCKS),
+   FARM("Buried farm", 0.45F, 4, Group.BLOCKS),
+   ANIMAL_FARM("Animal farm", 0.45F, 1, Group.ENTITIES),
    REDSTONE("Redstone", 0.40F, 4, Group.BLOCKS),
    SHAFT("Hand-mined shaft", 0.40F, 1, Group.TUNNELS),
    LIGHTING("Placed lights", 0.35F, 4, Group.BLOCKS),
@@ -50,6 +57,7 @@ public enum Signal {
       BLOCKS,
       TUNNELS,
       GROWTH,
-      PLAYERS
+      PLAYERS,
+      ENTITIES
    }
 }

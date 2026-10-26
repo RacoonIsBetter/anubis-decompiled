@@ -9,7 +9,9 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import net.anubis.client.basefinder.BaseEvidenceScanner;
 import net.anubis.client.basefinder.BaseFinderEntry;
 import net.anubis.client.basefinder.BaseFinderHud;
@@ -40,17 +42,36 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.BarrelBlock;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.block.FallingBlock;
 import net.minecraft.block.InfestedBlock;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LazyEntityReference;
+import net.minecraft.entity.Leashable;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.Tameable;
+import net.minecraft.entity.decoration.ArmorStandEntity;
+import net.minecraft.entity.decoration.ItemFrameEntity;
+import net.minecraft.entity.decoration.painting.PaintingEntity;
+import net.minecraft.entity.passive.AnimalEntity;
+import net.minecraft.entity.passive.AxolotlEntity;
+import net.minecraft.entity.passive.BeeEntity;
+import net.minecraft.entity.passive.TraderLlamaEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.registry.Registries;
+import net.minecraft.state.property.Properties;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.packet.s2c.play.BlockBreakingProgressS2CPacket;
+import net.minecraft.network.packet.s2c.play.BlockEventS2CPacket;
 import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.ColorHelper;
 import net.minecraft.util.math.MathHelper;
@@ -91,6 +112,12 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    /** Changes needed in a chunk before it is flagged, and where the signal reaches full strength. */
    private static final int HIDDEN_CHANGE_MIN = 3;
    private static final float HIDDEN_CHANGE_FULL = 8.0F;
+   /** A chest opened with no visible player this close was opened by someone you can't see. */
+   private static final double HIDDEN_USE_CLEARANCE = 6.0;
+   private static final int ENTITY_SCAN_TICKS = 20;
+   /** Same-type animals in one chunk before it looks bred; natural herds are 2 to 4. */
+   private static final int FARM_MIN_ANIMALS = 10;
+   private static final float FARM_FULL_ANIMALS = 24.0F;
 
    private final NumberSetting threshold = this.addSetting("min-probability", new NumberSetting("Min Probability %", 40.0F, 10.0F, 95.0F).step(5.0F));
    private final NumberSetting range = this.addSetting("range", new NumberSetting("Range", 512.0F, 64.0F, 2048.0F).step(16.0F));
@@ -98,6 +125,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final BooleanSetting scanTunnels = this.addSetting("tunnels", new BooleanSetting("Tunnels & Shafts", true));
    private final NumberSetting tunnelLength = this.addSetting("tunnel-length", new NumberSetting("Tunnel Length", 8.0F, 5.0F, 15.0F).step(1.0F));
    private final BooleanSetting scanGrowth = this.addSetting("growth", new BooleanSetting("Growth (Amethyst, Kelp)", true));
+   private final BooleanSetting scanEntities = this.addSetting("entities", new BooleanSetting("Entities (Frames, Pets, Farms)", true));
    private final BooleanSetting scanPlayers = this.addSetting("live-players", new BooleanSetting("Live Players", true));
    private final BooleanSetting hiddenPlayers = this.addSetting("hidden-players", new BooleanSetting("Hidden Players", true));
    private final NumberSetting playerMemory = this.addSetting("player-memory", new NumberSetting("Player Memory (s)", 120.0F, 10.0F, 600.0F).step(10.0F));
@@ -122,6 +150,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private long pinSeen;
    private final LongArrayList pendingChanges = new LongArrayList();
    private final LongArrayList pendingBreakers = new LongArrayList();
+   private final LongArrayList pendingOpens = new LongArrayList();
+   private Long2ObjectOpenHashMap<EntityEvidence> entityEvidence = new Long2ObjectOpenHashMap<>();
    private final Long2ObjectOpenHashMap<Digging> digging = new Long2ObjectOpenHashMap<>();
    private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
    private final LongOpenHashSet queued = new LongOpenHashSet();
@@ -166,7 +196,9 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.hidden.clear();
       this.pendingChanges.clear();
       this.pendingBreakers.clear();
+      this.pendingOpens.clear();
       this.digging.clear();
+      this.entityEvidence = new Long2ObjectOpenHashMap<>();
       this.queue.clear();
       this.queued.clear();
       this.dirtyAt.clear();
@@ -228,9 +260,17 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    /** The server tells nearby players who is breaking a block; a breaker you have no entity for is hidden from you. */
    @EventHandler
    public void onPacketReceive(PacketReceiveEvent event) {
-      if (this.scanning && this.watchingHidden() && event.packet instanceof BlockBreakingProgressS2CPacket progress) {
-         this.pendingBreakers.add(progress.getPos().asLong());
-         this.pendingBreakers.add(progress.getEntityId());
+      if (this.scanning && this.watchingHidden()) {
+         if (event.packet instanceof BlockBreakingProgressS2CPacket progress) {
+            this.pendingBreakers.add(progress.getPos().asLong());
+            this.pendingBreakers.add(progress.getEntityId());
+         } else if (event.packet instanceof BlockEventS2CPacket blockEvent && blockEvent.getType() == 1 && blockEvent.getData() > 0) {
+            // Chest lids: the server tells everyone nearby when a chest, ender chest or shulker box is opened.
+            Block block = blockEvent.getBlock();
+            if (block == Blocks.CHEST || block == Blocks.TRAPPED_CHEST || block == Blocks.ENDER_CHEST || block instanceof ShulkerBoxBlock) {
+               this.pendingOpens.add(blockEvent.getPos().asLong());
+            }
+         }
       }
    }
 
@@ -238,16 +278,22 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       return this.scanPlayers.get() && this.hiddenPlayers.get();
    }
 
-   /** A block mined out or placed underground with nobody you can see near it. */
+   /** A block mined out, placed or used (door, trapdoor, gate, barrel, lever) underground with nobody you can see near it. */
    private boolean outOfSightChange(BlockPos pos, BlockState was, BlockState now) {
-      if (was == null || now == null || was.getBlock() == now.getBlock()) {
+      if (was == null || now == null) {
          return false;
       }
 
-      boolean broke = now.isAir() && !was.isAir();
-      boolean placed = was.isAir() && !now.isAir();
-      if (!broke && !placed || natural(broke ? was : now, placed)) {
-         return false;
+      if (was.getBlock() == now.getBlock()) {
+         if (!used(was, now)) {
+            return false;
+         }
+      } else {
+         boolean broke = now.isAir() && !was.isAir();
+         boolean placed = was.isAir() && !now.isAir();
+         if (!broke && !placed || natural(broke ? was : now, placed)) {
+            return false;
+         }
       }
 
       MinecraftClient mc = MinecraftClient.getInstance();
@@ -270,7 +316,20 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
          }
       }
 
-      return true;
+      // Zombies and villagers open wooden doors; anything alive right next to the block may have done it.
+      return level.getEntitiesByClass(LivingEntity.class, new Box(pos).expand(2.0), e -> !(e instanceof PlayerEntity)).isEmpty();
+   }
+
+   /** Doors, trapdoors, gates and barrels opened or closed, or a lever flipped: only hands (or redstone) do that. */
+   private static boolean used(BlockState was, BlockState now) {
+      Block block = was.getBlock();
+      if (block == Blocks.LEVER) {
+         return was.get(Properties.POWERED) != now.get(Properties.POWERED);
+      }
+
+      boolean openable = block instanceof BarrelBlock || was.isIn(BlockTags.WOODEN_DOORS) || was.isIn(BlockTags.WOODEN_TRAPDOORS) || was.isIn(BlockTags.FENCE_GATES);
+      return openable && was.contains(Properties.OPEN) && was.get(Properties.OPEN) != now.get(Properties.OPEN)
+         && (!was.contains(Properties.POWERED) || was.get(Properties.POWERED) == now.get(Properties.POWERED));
    }
 
    /** Changes the world makes by itself: fluids, falling blocks, growth, decay, fire, mobs, pistons. */
@@ -314,6 +373,9 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       }
 
       this.trackHidden(mc, level);
+      if (this.ticks % ENTITY_SCAN_TICKS == 0) {
+         this.scanEntities(mc, level);
+      }
 
       if (this.rankDirty || this.ticks % RANK_EVERY_TICKS == 0) {
          this.rank(mc, level);
@@ -420,6 +482,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
          SimulationSignals.unsubscribe(this);
          this.pendingChanges.clear();
          this.pendingBreakers.clear();
+         this.pendingOpens.clear();
          this.digging.clear();
          this.dropHidden();
          return;
@@ -433,6 +496,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       SimulationSignals.tick(this);
       long now = System.currentTimeMillis();
       this.collectBreakers(mc, level, now);
+      this.collectOpens(level, now);
       this.collectChanges(now);
       // Player Bypass 2's ring inference only works in the overworld; the two checks above work everywhere.
       if (PlayerBypass2Module.netherOrEnd(level)) {
@@ -460,6 +524,29 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private void markHidden(BlockPos pos, float strength, String detail, long now) {
       this.hidden.put(ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4), new Hidden(strength, detail, now, pos.asLong()));
       this.rankDirty = true;
+   }
+
+   private void collectOpens(ClientWorld level, long now) {
+      double clearance = HIDDEN_USE_CLEARANCE * HIDDEN_USE_CLEARANCE;
+
+      for (int i = 0; i < this.pendingOpens.size(); i++) {
+         BlockPos pos = BlockPos.fromLong(this.pendingOpens.getLong(i));
+         Vec3d center = Vec3d.ofCenter(pos);
+         boolean seen = false;
+
+         for (AbstractClientPlayerEntity player : level.getPlayers()) {
+            if (player.squaredDistanceTo(center) < clearance) {
+               seen = true;
+               break;
+            }
+         }
+
+         if (!seen) {
+            this.markHidden(pos, 1.0F, "opened " + Registries.BLOCK.getId(level.getBlockState(pos).getBlock()).getPath().replace('_', ' ') + " out of sight", now);
+         }
+      }
+
+      this.pendingOpens.clear();
    }
 
    /** Block-breaking progress from an entity id you were never sent: a player mining out of your sight, at any depth. */
@@ -508,10 +595,73 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
             Hidden current = this.hidden.get(key);
             float strength = Math.min(1.0F, 0.4F + 0.6F * count / HIDDEN_CHANGE_FULL);
             if (current == null || current.strength() <= strength || now - current.seenAt() > PIN_HOLD_MS) {
-               this.markHidden(latest.get(key), strength, count + " blocks dug or placed out of sight", now);
+               this.markHidden(latest.get(key), strength, count + " blocks dug, placed or used out of sight", now);
             }
          }
       }
+   }
+
+   /**
+    * Entities only players leave behind: item frames, armor stands and paintings; tamed, named or
+    * leashed mobs; and more same-type animals in one chunk than nature spawns (a breeding pen).
+    */
+   private void scanEntities(MinecraftClient mc, ClientWorld level) {
+      Long2ObjectOpenHashMap<EntityEvidence> next = new Long2ObjectOpenHashMap<>();
+      if (this.scanEntities.get()) {
+         Long2ObjectOpenHashMap<Map<String, Integer>> herds = new Long2ObjectOpenHashMap<>();
+
+         for (Entity entity : level.getEntities()) {
+            if (entity instanceof PlayerEntity) {
+               continue;
+            }
+
+            BlockPos pos = entity.getBlockPos();
+            long key = ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4);
+            if (entity instanceof ItemFrameEntity || entity instanceof ArmorStandEntity || entity instanceof PaintingEntity) {
+               next.computeIfAbsent(key, k -> new EntityEvidence()).placed(pos);
+            } else if (this.pet(entity, mc)) {
+               next.computeIfAbsent(key, k -> new EntityEvidence()).pet(entity, pos);
+            }
+
+            if (entity instanceof AnimalEntity && !(entity instanceof AxolotlEntity) && !(entity instanceof BeeEntity)) {
+               herds.computeIfAbsent(key, k -> new HashMap<>()).merge(Registries.ENTITY_TYPE.getId(entity.getType()).getPath(), 1, Integer::sum);
+            }
+         }
+
+         var it = herds.long2ObjectEntrySet().fastIterator();
+
+         while (it.hasNext()) {
+            var entry = it.next();
+
+            for (var herd : entry.getValue().entrySet()) {
+               if (herd.getValue() >= FARM_MIN_ANIMALS) {
+                  next.computeIfAbsent(entry.getLongKey(), k -> new EntityEvidence()).farm(herd.getKey(), herd.getValue());
+               }
+            }
+         }
+      }
+
+      if (!next.isEmpty() || !this.entityEvidence.isEmpty()) {
+         this.rankDirty = true;
+      }
+
+      this.entityEvidence = next;
+   }
+
+   /** Tamed by someone else, name-tagged, or on a lead (wandering traders' llamas aside). */
+   private boolean pet(Entity entity, MinecraftClient mc) {
+      if (!(entity instanceof LivingEntity)) {
+         return false;
+      }
+
+      if (entity instanceof Tameable tameable) {
+         LazyEntityReference<?> owner = tameable.getOwnerReference();
+         if (owner != null) {
+            return !owner.getUuid().equals(mc.player.getUuid());
+         }
+      }
+
+      return entity.hasCustomName() || entity instanceof Leashable leashable && leashable.isLeashed() && !(entity instanceof TraderLlamaEntity);
    }
 
    private void dropHidden() {
@@ -629,6 +779,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       groups[Signal.Group.TUNNELS.ordinal()] = this.scanTunnels.get();
       groups[Signal.Group.GROWTH.ordinal()] = this.scanGrowth.get();
       groups[Signal.Group.PLAYERS.ordinal()] = this.scanPlayers.get();
+      groups[Signal.Group.ENTITIES.ordinal()] = this.scanEntities.get();
       float min = this.threshold.get() / 100.0F;
       double maxDistance = this.range.get();
       Vec3d eye = mc.player.getEyePos();
@@ -637,6 +788,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       LongOpenHashSet keys = new LongOpenHashSet(this.reports.keySet());
       keys.addAll(this.sightings.keySet());
       keys.addAll(this.hidden.keySet());
+      keys.addAll(this.entityEvidence.keySet());
       List<BaseFinderEntry> out = new ArrayList<>();
       var it = keys.iterator();
 
@@ -658,12 +810,14 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
             report = new ChunkReport(key);
          }
 
-         ChunkReport.Live live = new ChunkReport.Live(
-            this.playerStrength(sighting, now),
-            sighting == null ? null : sighting.name(),
-            this.hiddenStrength(hiddenHere, now),
-            hiddenHere == null ? null : hiddenHere.detail()
-         );
+         EntityEvidence entities = this.entityEvidence.get(key);
+         ChunkReport.Live live = new ChunkReport.Live()
+            .put(Signal.PLAYER, this.playerStrength(sighting, now), sighting == null ? null : sighting.name())
+            .put(Signal.HIDDEN_PLAYER, this.hiddenStrength(hiddenHere, now), hiddenHere == null ? null : hiddenHere.detail());
+         if (entities != null) {
+            entities.into(live);
+         }
+
          float p = report.probability(groups, live);
          if (p < min) {
             continue;
@@ -672,10 +826,12 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
          List<ChunkReport.Reason> reasons = report.reasons(groups, live);
          Signal top = reasons.get(0).signal();
          long anchor = report.anchor;
-         if (live.player() > 0.0F && (anchor == 0L || top == Signal.PLAYER)) {
+         if (live.get(Signal.PLAYER) > 0.0F && (anchor == 0L || top == Signal.PLAYER)) {
             anchor = sighting.pos();
-         } else if (live.hidden() > 0.0F && hiddenHere.pos() != 0L && (anchor == 0L || top == Signal.HIDDEN_PLAYER)) {
+         } else if (live.get(Signal.HIDDEN_PLAYER) > 0.0F && hiddenHere.pos() != 0L && (anchor == 0L || top == Signal.HIDDEN_PLAYER)) {
             anchor = hiddenHere.pos();
+         } else if (entities != null && entities.anchor != 0L && (anchor == 0L || top.group == Signal.Group.ENTITIES)) {
+            anchor = entities.anchor;
          }
 
          BlockPos at = anchor == 0L ? BlockPos.ofFloored(centerX, eye.y, centerZ) : BlockPos.fromLong(anchor);
@@ -785,6 +941,55 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
 
    @Environment(EnvType.CLIENT)
    private record Digging(int count, long lastAt) {
+   }
+
+   @Environment(EnvType.CLIENT)
+   private static final class EntityEvidence {
+      int placed;
+      int pets;
+      String petName;
+      int farmed;
+      String farmType;
+      long anchor;
+
+      void placed(BlockPos pos) {
+         this.placed++;
+         this.anchor = pos.asLong();
+      }
+
+      void pet(Entity entity, BlockPos pos) {
+         if (this.pets++ == 0 || entity.hasCustomName()) {
+            this.petName = entity.hasCustomName()
+               ? entity.getCustomName().getString()
+               : Registries.ENTITY_TYPE.getId(entity.getType()).getPath().replace('_', ' ');
+         }
+
+         if (this.placed == 0) {
+            this.anchor = pos.asLong();
+         }
+      }
+
+      void farm(String type, int count) {
+         if (count > this.farmed) {
+            this.farmed = count;
+            this.farmType = type.replace('_', ' ');
+         }
+      }
+
+      void into(ChunkReport.Live live) {
+         if (this.placed > 0) {
+            live.put(Signal.PLACED_ENTITIES, Signal.PLACED_ENTITIES.strengthFor(this.placed), "x" + this.placed);
+         }
+
+         if (this.pets > 0) {
+            live.put(Signal.PETS, 1.0F, this.pets > 1 ? this.petName + " +" + (this.pets - 1) : this.petName);
+         }
+
+         if (this.farmed > 0) {
+            float strength = 0.4F + 0.6F * (this.farmed - FARM_MIN_ANIMALS) / (FARM_FULL_ANIMALS - FARM_MIN_ANIMALS);
+            live.put(Signal.ANIMAL_FARM, strength, this.farmed + " " + this.farmType);
+         }
+      }
    }
 
    @Environment(EnvType.CLIENT)

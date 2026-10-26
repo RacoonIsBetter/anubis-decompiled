@@ -91,32 +91,47 @@ public final class ChunkReport {
    }
 
    private float strength(Signal signal, Live live) {
-      float scanned = this.strength[signal.ordinal()];
-      return switch (signal) {
-         case PLAYER -> Math.max(live.player(), scanned);
-         case HIDDEN_PLAYER -> Math.max(live.hidden(), scanned);
-         default -> scanned;
-      };
+      return Math.max(live.strength[signal.ordinal()], this.strength[signal.ordinal()]);
    }
 
    private static String describe(Signal signal, int count, Live live) {
+      String detail = live.detail[signal.ordinal()];
+      if (detail != null && live.strength[signal.ordinal()] > 0.0F) {
+         return detail.isEmpty() ? signal.label : signal.label + ": " + detail;
+      }
+
       return switch (signal) {
-         case PLAYER -> live.playerName() == null ? signal.label : signal.label + ": " + live.playerName();
-         case HIDDEN_PLAYER -> live.hiddenDetail() == null ? signal.label : signal.label + " (" + live.hiddenDetail() + ")";
+         case PLAYER, HIDDEN_PLAYER, PETS, ANIMAL_FARM, PLACED_ENTITIES -> signal.label;
          case AMETHYST, KELP -> signal.label + " (" + count + "% grown)";
          case TUNNEL, SHAFT, DRIPSTONE -> signal.label + (count > 1 ? " x" + count : "");
          case SURFACE_BUILD -> signal.label + " (" + count + " blocks)";
+         case ROOM, NETHER_PORTAL -> signal.label + (count > 1 ? " x" + count : "");
          default -> signal.label + " x" + count;
       };
    }
 
    /**
-    * Evidence that is not in the blocks: a player seen underground, and activity Player Bypass 2's
-    * inference attributes to a player nobody can see. Strengths are in [0, 1].
+    * Evidence that is not in the blocks (players seen or inferred, entities): per signal, a strength
+    * in [0, 1] and the text the tooltip shows after the label. The stronger of this and the scan wins.
     */
    @Environment(EnvType.CLIENT)
-   public record Live(float player, String playerName, float hidden, String hiddenDetail) {
-      public static final Live NONE = new Live(0.0F, null, 0.0F, null);
+   public static final class Live {
+      final float[] strength = new float[Signal.VALUES.length];
+      final String[] detail = new String[Signal.VALUES.length];
+
+      public Live put(Signal signal, float value, String text) {
+         int i = signal.ordinal();
+         if (value > this.strength[i]) {
+            this.strength[i] = Math.min(1.0F, value);
+            this.detail[i] = text;
+         }
+
+         return this;
+      }
+
+      public float get(Signal signal) {
+         return this.strength[signal.ordinal()];
+      }
    }
 
    @Environment(EnvType.CLIENT)
