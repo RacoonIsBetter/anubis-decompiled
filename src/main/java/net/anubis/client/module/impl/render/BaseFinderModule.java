@@ -1,6 +1,7 @@
 package net.anubis.client.module.impl.render;
 
 import imgui.ImDrawList;
+import it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
@@ -23,6 +24,7 @@ import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.HudOverlayProvider;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.impl.client.PerformanceModule;
+import net.anubis.client.module.impl.misc.PlayerBypass2Module;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
@@ -31,10 +33,12 @@ import net.anubis.client.util.FoglessLines;
 import net.anubis.client.util.LevelUtil;
 import net.anubis.client.util.PerformanceBudget;
 import net.anubis.client.util.TracerEngine;
+import net.anubis.client.util.playerbypass2.SimulationSignals;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
 import net.minecraft.util.math.BlockPos;
@@ -51,8 +55,9 @@ import net.minecraft.world.debug.gizmo.GizmoDrawing;
 
 /**
  * One module for base hunting: scores every loaded chunk for player activity (placed blocks,
- * rotated deepslate, hand-mined tunnels and shafts, grown amethyst and kelp, players hiding
- * underground), ranks them by probability, and explains each find.
+ * rotated deepslate, hand-mined tunnels and shafts, grown amethyst and kelp, lined-up surface
+ * builds, players hiding underground, and players nobody can see whose chunks keep ticking),
+ * ranks them by probability, and explains each find.
  */
 @Environment(EnvType.CLIENT)
 public final class BaseFinderModule extends ClientModule implements HudOverlayProvider {
@@ -61,6 +66,13 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private static final int UNDERGROUND_DEPTH = 8;
    private static final int MAX_REPORTS = 8192;
    private static final long NOTIFY_COOLDOWN_MS = 1500L;
+   /** Chunk-signal score below which Player Bypass 2's sources are ignored (same as that module). */
+   private static final float HIDDEN_MIN_SOURCE = 0.5F;
+   /** Summed activity around a peak needed before it counts as a hidden player, and where it reaches full strength. */
+   private static final float HIDDEN_MIN_ACTIVITY = 8.0F;
+   private static final float HIDDEN_FULL_ACTIVITY = 24.0F;
+   /** A pinned (exact) hidden player is not replaced by a vaguer field peak for this long. */
+   private static final long PIN_HOLD_MS = 10000L;
 
    private final NumberSetting threshold = this.addSetting("min-probability", new NumberSetting("Min Probability %", 40.0F, 10.0F, 95.0F).step(5.0F));
    private final NumberSetting range = this.addSetting("range", new NumberSetting("Range", 512.0F, 64.0F, 2048.0F).step(16.0F));
@@ -69,6 +81,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final NumberSetting tunnelLength = this.addSetting("tunnel-length", new NumberSetting("Tunnel Length", 8.0F, 5.0F, 15.0F).step(1.0F));
    private final BooleanSetting scanGrowth = this.addSetting("growth", new BooleanSetting("Growth (Amethyst, Kelp)", true));
    private final BooleanSetting scanPlayers = this.addSetting("live-players", new BooleanSetting("Live Players", true));
+   private final BooleanSetting hiddenPlayers = this.addSetting("hidden-players", new BooleanSetting("Hidden Players", true));
    private final NumberSetting playerMemory = this.addSetting("player-memory", new NumberSetting("Player Memory (s)", 120.0F, 10.0F, 600.0F).step(10.0F));
    private final ModeSetting highlight = this.addSetting("highlight", new ModeSetting("Highlight", "Evidence Depth", "Evidence Depth", "Fixed Height", "Off"));
    private final NumberSetting highlightY = this.addSetting("highlight-height", new NumberSetting("Height", 64.0F, -64.0F, 320.0F).step(1.0F));
@@ -87,6 +100,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final BaseFinderHud hud = new BaseFinderHud();
    private final Long2ObjectOpenHashMap<ChunkReport> reports = new Long2ObjectOpenHashMap<>();
    private final Long2ObjectOpenHashMap<Sighting> sightings = new Long2ObjectOpenHashMap<>();
+   private final Long2ObjectOpenHashMap<Hidden> hidden = new Long2ObjectOpenHashMap<>();
+   private long pinSeen;
    private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
    private final LongOpenHashSet queued = new LongOpenHashSet();
    private final Long2IntOpenHashMap dirtyAt = new Long2IntOpenHashMap();
@@ -106,6 +121,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.notifyAbove.visibleWhen(notifications::get);
       this.tunnelLength.visibleWhen(this.scanTunnels::get);
       this.playerMemory.visibleWhen(this.scanPlayers::get);
+      this.hiddenPlayers.visibleWhen(this.scanPlayers::get);
       this.highlightY.visibleWhen(() -> this.highlight.is("Fixed Height"));
       this.panelRows.visibleWhen(this.panel::get);
       this.panelX.visibleWhen(this.panel::get);
@@ -119,12 +135,14 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
 
    @Override
    protected void onDisable() {
+      SimulationSignals.unsubscribe(this);
       this.startLevel(null);
    }
 
    private void startLevel(ClientWorld level) {
       this.reports.clear();
       this.sightings.clear();
+      this.hidden.clear();
       this.queue.clear();
       this.queued.clear();
       this.dirtyAt.clear();
@@ -197,6 +215,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       if (this.scanPlayers.get()) {
          this.trackPlayers(mc, level);
       }
+
+      this.trackHidden(mc, level);
 
       if (this.rankDirty || this.ticks % RANK_EVERY_TICKS == 0) {
          this.rank(mc, level);
@@ -293,6 +313,150 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       }
    }
 
+   /**
+    * Reads Player Bypass 2's inference (shared with that module when it is on too): chunks outside
+    * your simulation distance that keep ticking point at a player loading them, and hidden
+    * attackers or item pickups pin one exactly.
+    */
+   private void trackHidden(MinecraftClient mc, ClientWorld level) {
+      if (!this.scanPlayers.get() || !this.hiddenPlayers.get()) {
+         SimulationSignals.unsubscribe(this);
+         this.dropHidden();
+         return;
+      }
+
+      if (!SimulationSignals.subscribed(this)) {
+         SimulationSignals.subscribe(this);
+         this.pinSeen = SimulationSignals.pinTotal();
+      }
+
+      SimulationSignals.tick(this);
+      if (PlayerBypass2Module.netherOrEnd(level)) {
+         this.pinSeen = SimulationSignals.pinTotal();
+         this.dropHidden();
+         return;
+      }
+
+      long now = System.currentTimeMillis();
+      SimulationSignals.pinsSince(this.pinSeen, pin -> {
+         BlockPos pos = pin.pos();
+         String detail = pin.detail();
+         int at = detail.indexOf(" @ ");
+         long key = ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4);
+         this.hidden.put(key, new Hidden(1.0F, at < 0 ? detail : detail.substring(0, at), now, pos.asLong()));
+         this.rankDirty = true;
+      });
+      this.pinSeen = SimulationSignals.pinTotal();
+      if (this.ticks % RANK_EVERY_TICKS == 0) {
+         this.inferHidden(mc.player, now);
+      }
+
+      long memory = (long)(this.playerMemory.get() * 1000.0F);
+      if (this.hidden.values().removeIf(h -> now - h.seenAt() > memory)) {
+         this.rankDirty = true;
+      }
+   }
+
+   private void dropHidden() {
+      if (!this.hidden.isEmpty()) {
+         this.hidden.clear();
+         this.rankDirty = true;
+      }
+   }
+
+   /** The same field Player Bypass 2 builds: each ticking chunk votes for every chunk within simulation distance of it. */
+   private void inferHidden(ClientPlayerEntity self, long now) {
+      long nanos = SimulationSignals.now();
+      int sim = SimulationSignals.simulation();
+      int pcx = self.getBlockPos().getX() >> 4;
+      int pcz = self.getBlockPos().getZ() >> 4;
+      int start = SimulationSignals.ringStart();
+      int view = SimulationSignals.view();
+      int side = 2 * sim + 1;
+      float span = sim * 1.4143F + 1.0F;
+      float[] weights = new float[side * side];
+
+      for (int dx = -sim; dx <= sim; dx++) {
+         for (int dz = -sim; dz <= sim; dz++) {
+            weights[(dx + sim) * side + dz + sim] = 1.0F - 0.3F * (float)Math.sqrt(dx * dx + dz * dz) / span;
+         }
+      }
+
+      Long2FloatOpenHashMap field = new Long2FloatOpenHashMap();
+      Long2FloatOpenHashMap raw = new Long2FloatOpenHashMap();
+      var sources = SimulationSignals.chunks().long2ObjectEntrySet().iterator();
+
+      while (sources.hasNext()) {
+         var entry = sources.next();
+         long key = entry.getLongKey();
+         int cx = ChunkPos.getPackedX(key);
+         int cz = ChunkPos.getPackedZ(key);
+         int d = SimulationSignals.distance(cx, cz, pcx, pcz);
+         float score = entry.getValue().score(nanos);
+         if (d >= start && d <= view && score >= HIDDEN_MIN_SOURCE) {
+            for (int dx = -sim; dx <= sim; dx++) {
+               for (int dz = -sim; dz <= sim; dz++) {
+                  long area = ChunkPos.toLong(cx + dx, cz + dz);
+                  field.addTo(area, score * weights[(dx + sim) * side + dz + sim]);
+                  raw.addTo(area, score);
+               }
+            }
+         }
+      }
+
+      var frozen = SimulationSignals.frozen().iterator();
+
+      while (frozen.hasNext()) {
+         long key = frozen.nextLong();
+         field.remove(key);
+         raw.remove(key);
+      }
+
+      var cells = field.long2FloatEntrySet().iterator();
+
+      while (cells.hasNext()) {
+         var cell = cells.next();
+         long key = cell.getLongKey();
+         float activity = raw.get(key);
+         if (activity >= HIDDEN_MIN_ACTIVITY && isPeak(field, key, cell.getFloatValue(), sim)) {
+            Hidden was = this.hidden.get(key);
+            if (was == null || was.pos() == 0L || now - was.seenAt() > PIN_HOLD_MS) {
+               float strength = Math.min(1.0F, activity / HIDDEN_FULL_ACTIVITY);
+               this.hidden.put(key, new Hidden(strength, "ticking chunks, activity " + Math.round(activity), now, 0L));
+               this.rankDirty |= was == null;
+            }
+         }
+      }
+   }
+
+   private static boolean isPeak(Long2FloatOpenHashMap field, long key, float value, int reach) {
+      int cx = ChunkPos.getPackedX(key);
+      int cz = ChunkPos.getPackedZ(key);
+
+      for (int dx = -reach; dx <= reach; dx++) {
+         for (int dz = -reach; dz <= reach; dz++) {
+            if (dx != 0 || dz != 0) {
+               long other = ChunkPos.toLong(cx + dx, cz + dz);
+               float near = field.get(other);
+               if (near > value || near == value && other < key) {
+                  return false;
+               }
+            }
+         }
+      }
+
+      return true;
+   }
+
+   private float hiddenStrength(Hidden hidden, long now) {
+      if (hidden == null || !this.scanPlayers.get() || !this.hiddenPlayers.get()) {
+         return 0.0F;
+      }
+
+      float memory = this.playerMemory.get() * 1000.0F;
+      return hidden.strength() * Math.max(0.0F, 1.0F - (now - hidden.seenAt()) / memory * 0.5F);
+   }
+
    private float playerStrength(Sighting sighting, long now) {
       if (sighting == null || !this.scanPlayers.get()) {
          return 0.0F;
@@ -315,6 +479,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       long now = System.currentTimeMillis();
       LongOpenHashSet keys = new LongOpenHashSet(this.reports.keySet());
       keys.addAll(this.sightings.keySet());
+      keys.addAll(this.hidden.keySet());
       List<BaseFinderEntry> out = new ArrayList<>();
       var it = keys.iterator();
 
@@ -331,20 +496,31 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
 
          ChunkReport report = this.reports.get(key);
          Sighting sighting = this.sightings.get(key);
+         Hidden hiddenHere = this.hidden.get(key);
          if (report == null) {
             report = new ChunkReport(key);
          }
 
-         float playerStrength = this.playerStrength(sighting, now);
-         float p = report.probability(groups, playerStrength);
+         ChunkReport.Live live = new ChunkReport.Live(
+            this.playerStrength(sighting, now),
+            sighting == null ? null : sighting.name(),
+            this.hiddenStrength(hiddenHere, now),
+            hiddenHere == null ? null : hiddenHere.detail()
+         );
+         float p = report.probability(groups, live);
          if (p < min) {
             continue;
          }
 
-         List<ChunkReport.Reason> reasons = report.reasons(groups, playerStrength, sighting == null ? null : sighting.name());
-         long anchor = playerStrength > 0.0F && (report.anchor == 0L || Signal.PLAYER.weight >= reasons.get(0).signal().weight)
-            ? sighting.pos()
-            : report.anchor;
+         List<ChunkReport.Reason> reasons = report.reasons(groups, live);
+         Signal top = reasons.get(0).signal();
+         long anchor = report.anchor;
+         if (live.player() > 0.0F && (anchor == 0L || top == Signal.PLAYER)) {
+            anchor = sighting.pos();
+         } else if (live.hidden() > 0.0F && hiddenHere.pos() != 0L && (anchor == 0L || top == Signal.HIDDEN_PLAYER)) {
+            anchor = hiddenHere.pos();
+         }
+
          BlockPos at = anchor == 0L ? BlockPos.ofFloored(centerX, eye.y, centerZ) : BlockPos.fromLong(anchor);
          double targetYaw = Math.toDegrees(Math.atan2(-(centerX - eye.x), centerZ - eye.z));
          float bearing = MathHelper.wrapDegrees((float)targetYaw - yaw);
@@ -443,6 +619,11 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
 
    @Environment(EnvType.CLIENT)
    private record Sighting(String name, long seenAt, long pos) {
+   }
+
+   /** A player inferred but not seen; {@code pos} is 0 when only the chunk is known. */
+   @Environment(EnvType.CLIENT)
+   private record Hidden(float strength, String detail, long seenAt, long pos) {
    }
 
    @Environment(EnvType.CLIENT)

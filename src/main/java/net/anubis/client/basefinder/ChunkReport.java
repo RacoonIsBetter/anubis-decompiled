@@ -60,14 +60,13 @@ public final class ChunkReport {
       return true;
    }
 
-   /** Probability from the scanned blocks, optionally combined with a live-player sighting. */
-   public float probability(boolean[] enabledGroups, float playerStrength) {
+   /** Probability from the scanned blocks, combined with what is live in the chunk (players seen or inferred). */
+   public float probability(boolean[] enabledGroups, Live live) {
       float miss = 1.0F;
 
       for (Signal signal : Signal.VALUES) {
          if (enabledGroups[signal.group.ordinal()]) {
-            float s = signal == Signal.PLAYER ? Math.max(playerStrength, this.strength[signal.ordinal()]) : this.strength[signal.ordinal()];
-            miss *= 1.0F - signal.weight * s;
+            miss *= 1.0F - signal.weight * this.strength(signal, live);
          }
       }
 
@@ -75,15 +74,14 @@ public final class ChunkReport {
    }
 
    /** Reasons sorted by how much they contributed, strongest first. */
-   public List<Reason> reasons(boolean[] enabledGroups, float playerStrength, String playerName) {
+   public List<Reason> reasons(boolean[] enabledGroups, Live live) {
       List<Reason> out = new ArrayList<>();
 
       for (Signal signal : Signal.VALUES) {
          if (enabledGroups[signal.group.ordinal()]) {
-            int i = signal.ordinal();
-            float s = signal == Signal.PLAYER ? Math.max(playerStrength, this.strength[i]) : this.strength[i];
+            float s = this.strength(signal, live);
             if (s > 0.0F) {
-               out.add(new Reason(signal, signal.weight * s, describe(signal, this.count[i], playerName)));
+               out.add(new Reason(signal, signal.weight * s, describe(signal, this.count[signal.ordinal()], live)));
             }
          }
       }
@@ -92,13 +90,33 @@ public final class ChunkReport {
       return out;
    }
 
-   private static String describe(Signal signal, int count, String playerName) {
+   private float strength(Signal signal, Live live) {
+      float scanned = this.strength[signal.ordinal()];
       return switch (signal) {
-         case PLAYER -> playerName == null ? signal.label : signal.label + ": " + playerName;
+         case PLAYER -> Math.max(live.player(), scanned);
+         case HIDDEN_PLAYER -> Math.max(live.hidden(), scanned);
+         default -> scanned;
+      };
+   }
+
+   private static String describe(Signal signal, int count, Live live) {
+      return switch (signal) {
+         case PLAYER -> live.playerName() == null ? signal.label : signal.label + ": " + live.playerName();
+         case HIDDEN_PLAYER -> live.hiddenDetail() == null ? signal.label : signal.label + " (" + live.hiddenDetail() + ")";
          case AMETHYST, KELP -> signal.label + " (" + count + "% grown)";
          case TUNNEL, SHAFT, DRIPSTONE -> signal.label + (count > 1 ? " x" + count : "");
+         case SURFACE_BUILD -> signal.label + " (" + count + " blocks)";
          default -> signal.label + " x" + count;
       };
+   }
+
+   /**
+    * Evidence that is not in the blocks: a player seen underground, and activity Player Bypass 2's
+    * inference attributes to a player nobody can see. Strengths are in [0, 1].
+    */
+   @Environment(EnvType.CLIENT)
+   public record Live(float player, String playerName, float hidden, String hiddenDetail) {
+      public static final Live NONE = new Live(0.0F, null, 0.0F, null);
    }
 
    @Environment(EnvType.CLIENT)

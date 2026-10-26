@@ -14,8 +14,10 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -83,7 +85,10 @@ public final class SimulationSignals {
    private static int simOverride;
    private static int margin;
    private static boolean ignoreVisiblePlayers = true;
-   private static long memoryNanos = 30000000000L;
+   private static long memoryNanos = 45000000000L;
+   private static final LinkedHashSet<Object> SUBSCRIBERS = new LinkedHashSet<>();
+   private static final ArrayDeque<SimulationSignals.Pin> PIN_HISTORY = new ArrayDeque<>();
+   private static long pinTotal;
    private static int ticks;
    private static int session;
    private static RegistryKey<World> dimension;
@@ -116,12 +121,36 @@ public final class SimulationSignals {
    private SimulationSignals() {
    }
 
-   public static void configure(boolean on, int simulationOverride, int ringMargin, boolean ignorePlayers, int memorySeconds) {
-      if (active && !on) {
+   /**
+    * Starts collecting on behalf of {@code owner}. Several modules can subscribe at once; signals
+    * are collected while at least one is subscribed and cleared when the last one leaves.
+    */
+   public static void subscribe(Object owner) {
+      if (SUBSCRIBERS.add(owner) && !active) {
+         clear();
+         active = true;
+      }
+   }
+
+   public static void unsubscribe(Object owner) {
+      if (SUBSCRIBERS.remove(owner) && SUBSCRIBERS.isEmpty()) {
+         active = false;
          clear();
       }
+   }
 
-      active = on;
+   public static boolean subscribed(Object owner) {
+      return SUBSCRIBERS.contains(owner);
+   }
+
+   /** Advances the shared state once per client tick: only the earliest subscriber drives it. */
+   public static void tick(Object owner) {
+      if (!SUBSCRIBERS.isEmpty() && SUBSCRIBERS.iterator().next() == owner) {
+         tick();
+      }
+   }
+
+   public static void configure(int simulationOverride, int ringMargin, boolean ignorePlayers, int memorySeconds) {
       simOverride = simulationOverride;
       margin = ringMargin;
       ignoreVisiblePlayers = ignorePlayers;
@@ -148,6 +177,7 @@ public final class SimulationSignals {
       LAST_ACTIVE.clear();
       FROZEN.clear();
       PINS.clear();
+      PIN_HISTORY.clear();
       Arrays.fill(MOVES_BY_DISTANCE, 0.0F);
       hasLast = false;
       hasSample = false;
@@ -195,6 +225,23 @@ public final class SimulationSignals {
 
    public static void dropPins() {
       PINS.clear();
+   }
+
+   /** Count of pins ever raised; pass it back to {@link #pinsSince} to read only newer ones. */
+   public static long pinTotal() {
+      return pinTotal;
+   }
+
+   /** Reads pins raised after {@code seen} without taking them from {@link #pollPin()}. */
+   public static void pinsSince(long seen, Consumer<SimulationSignals.Pin> sink) {
+      long fresh = Math.min(pinTotal - seen, PIN_HISTORY.size());
+      int skip = PIN_HISTORY.size() - (int)Math.max(0L, fresh);
+
+      for (SimulationSignals.Pin pin : PIN_HISTORY) {
+         if (skip-- <= 0) {
+            sink.accept(pin);
+         }
+      }
    }
 
    public static boolean holding() {
@@ -630,7 +677,14 @@ public final class SimulationSignals {
             PINS.poll();
          }
 
-         PINS.add(new SimulationSignals.Pin(pos.toImmutable(), detail + " @ " + pos.getX() + " " + pos.getY() + " " + pos.getZ()));
+         SimulationSignals.Pin made = new SimulationSignals.Pin(pos.toImmutable(), detail + " @ " + pos.getX() + " " + pos.getY() + " " + pos.getZ());
+         PINS.add(made);
+         if (PIN_HISTORY.size() >= 32) {
+            PIN_HISTORY.poll();
+         }
+
+         PIN_HISTORY.add(made);
+         pinTotal++;
       }
    }
 

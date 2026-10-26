@@ -32,6 +32,10 @@ public final class BaseEvidenceScanner {
    private static final int GRID_MAX_Y = 72;
    private static final int SHAFT_MIN_HEIGHT = 10;
    private static final int LONG_DRIPSTONE = 8;
+   /** A surface block only counts as part of a build when it sits in a straight line of this many. */
+   private static final int SURFACE_LINE = 3;
+   /** Below this many lined-up surface blocks, a chunk's surface is treated as scattered junk. */
+   private static final int SURFACE_BUILD_MIN = 6;
    private static final byte AIR = 0;
    private static final byte SOLID = 1;
    private static final byte OTHER = 2;
@@ -58,7 +62,12 @@ public final class BaseEvidenceScanner {
    private static final byte MARK_MONUMENT = 19;
    private static final byte MARK_SPAWNER = 20;
    private static final byte MARK_MOSSY_COBBLE = 21;
-   private static final byte CATEGORY_COUNT = 22;
+   /** Player-only building blocks (concrete, stained glass, quartz, metal blocks): buried or lined up on the surface. */
+   private static final byte CRAFTED_BUILDING = 22;
+   private static final byte SURFACE_BUILD = 23;
+   private static final byte STORAGE_SURFACE = 24;
+   private static final byte UTILITY_SURFACE = 25;
+   private static final byte CATEGORY_COUNT = 26;
 
    private final Map<Block, Byte> categories = new IdentityHashMap<>();
    private final int[] surface = new int[256];
@@ -146,7 +155,21 @@ public final class BaseEvidenceScanner {
                            this.note(DEEPSLATE, pos);
                         }
                      }
-                     case STORAGE_ANY, UTILITY_ANY, MARK_STRONGHOLD, MARK_ANCIENT_CITY, MARK_TRIAL, MARK_RUINED_PORTAL, MARK_MONUMENT, MARK_SPAWNER,
+                     case STORAGE_ANY, UTILITY_ANY -> {
+                        if (buried) {
+                           this.note(category, pos);
+                        } else {
+                           this.note(category == STORAGE_ANY ? STORAGE_SURFACE : UTILITY_SURFACE, pos);
+                        }
+                     }
+                     case CRAFTED_BUILDING -> {
+                        if (buried) {
+                           this.note(BUILDING, pos);
+                        } else if (this.inLine(level, state.getBlock(), baseX + x, worldY, baseZ + z)) {
+                           this.note(SURFACE_BUILD, pos);
+                        }
+                     }
+                     case MARK_STRONGHOLD, MARK_ANCIENT_CITY, MARK_TRIAL, MARK_RUINED_PORTAL, MARK_MONUMENT, MARK_SPAWNER,
                         MARK_MOSSY_COBBLE -> this.note(category, pos);
                      case STORAGE_BURIED, CHEST, UTILITY_BURIED, REDSTONE, LIGHT, BUILDING, OBSIDIAN -> {
                         if (buried) {
@@ -224,8 +247,17 @@ public final class BaseEvidenceScanner {
       boolean trial = this.found[MARK_TRIAL] > 0;
       boolean dungeon = this.found[MARK_SPAWNER] > 0 && this.found[MARK_MOSSY_COBBLE] > 0;
       boolean structure = stronghold || ancientCity || trial;
+      boolean surfaceBuild = this.found[SURFACE_BUILD] >= SURFACE_BUILD_MIN;
       this.give(report, Signal.ROTATED_DEEPSLATE, DEEPSLATE);
       this.give(report, Signal.STORAGE, STORAGE_ANY);
+      if (surfaceBuild) {
+         this.give(report, Signal.SURFACE_BUILD, SURFACE_BUILD);
+      }
+
+      // Storage and utility blocks lying around on the surface with no build next to them are
+      // usually junk (dropped loot, griefed spawn, highway litter): they count once, not per block.
+      this.giveSurface(report, Signal.STORAGE, STORAGE_SURFACE, surfaceBuild);
+      this.giveSurface(report, Signal.UTILITY, UTILITY_SURFACE, surfaceBuild);
       if (!structure) {
          this.give(report, Signal.STORAGE, STORAGE_BURIED);
          if (!dungeon && !ocean) {
@@ -257,6 +289,35 @@ public final class BaseEvidenceScanner {
       if (this.found[category] > 0) {
          report.add(signal, this.found[category], this.firstAt[category]);
       }
+   }
+
+   private void giveSurface(ChunkReport report, Signal signal, byte category, boolean surfaceBuild) {
+      if (this.found[category] > 0) {
+         report.add(signal, surfaceBuild ? this.found[category] : 1, this.firstAt[category]);
+      }
+   }
+
+   /** True when {@code block} continues on both sides along one axis: part of a wall, floor or pillar, not a lone block. */
+   private boolean inLine(ClientWorld level, Block block, int x, int y, int z) {
+      for (Direction.Axis axis : Direction.Axis.values()) {
+         int run = 1;
+
+         for (int sign = -1; sign <= 1; sign += 2) {
+            int dx = axis == Direction.Axis.X ? sign : 0;
+            int dy = axis == Direction.Axis.Y ? sign : 0;
+            int dz = axis == Direction.Axis.Z ? sign : 0;
+
+            for (int step = 1; step < SURFACE_LINE && level.getBlockState(this.cursor.set(x + dx * step, y + dy * step, z + dz * step)).isOf(block); step++) {
+               run++;
+            }
+         }
+
+         if (run >= SURFACE_LINE) {
+            return true;
+         }
+      }
+
+      return false;
    }
 
    private void note(byte category, long pos) {
@@ -421,6 +482,12 @@ public final class BaseEvidenceScanner {
       }
 
       String path = Registries.BLOCK.getId(block).getPath();
+      if (path.endsWith("_concrete") || path.contains("stained_glass") || path.startsWith("quartz_") || path.startsWith("smooth_quartz")
+         || block == Blocks.IRON_BLOCK || block == Blocks.DIAMOND_BLOCK || block == Blocks.EMERALD_BLOCK || block == Blocks.NETHERITE_BLOCK
+         || block == Blocks.LAPIS_BLOCK) {
+         return CRAFTED_BUILDING;
+      }
+
       if (path.endsWith("_concrete") || path.endsWith("glass") || path.endsWith("glass_pane") || path.endsWith("_wool") || path.endsWith("_carpet")
          || path.equals("bricks") || path.equals("quartz_block") || path.equals("smooth_stone") || path.startsWith("polished_blackstone")) {
          return BUILDING;

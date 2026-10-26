@@ -77,14 +77,14 @@ public final class PlayerBypass2Module extends ClientModule {
       this.foundByDimension.clear();
       this.found = new LongLinkedOpenHashSet();
       this.session = SimulationSignals.session();
-      SimulationSignals.clear();
+      SimulationSignals.subscribe(this);
       this.configure();
       this.on(TickEvent.TYPE, Stage.POST, this::onTick);
    }
 
    @Override
    protected void onDisable() {
-      SimulationSignals.configure(false, 0, 0, true, 30);
+      SimulationSignals.unsubscribe(this);
       this.peaks.clear();
       this.foundByDimension.clear();
       this.found = new LongLinkedOpenHashSet();
@@ -94,10 +94,10 @@ public final class PlayerBypass2Module extends ClientModule {
    }
 
    private void configure() {
-      SimulationSignals.configure(true, 0, 0, true, 45);
+      SimulationSignals.configure(0, 0, true, 45);
    }
 
-   private static boolean netherOrEnd(World level) {
+   public static boolean netherOrEnd(World level) {
       RegistryKey<World> dimension = level.getRegistryKey();
       return dimension.equals(World.NETHER)
          || dimension.equals(World.END)
@@ -122,7 +122,7 @@ public final class PlayerBypass2Module extends ClientModule {
 
          this.found = this.foundByDimension.computeIfAbsent(mc.world.getRegistryKey(), key -> new LongLinkedOpenHashSet());
          this.configure();
-         SimulationSignals.tick();
+         SimulationSignals.tick(this);
          if (netherOrEnd(mc.world)) {
             SimulationSignals.dropPins();
             this.shown.clear();
