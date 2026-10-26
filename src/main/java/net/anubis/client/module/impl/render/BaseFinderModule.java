@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,6 +19,7 @@ import net.anubis.client.chat.ModuleChat;
 import net.anubis.client.event.EventHandler;
 import net.anubis.client.event.impl.BlockUpdateEvent;
 import net.anubis.client.event.impl.PacketAppliedEvent;
+import net.anubis.client.event.impl.PacketReceiveEvent;
 import net.anubis.client.event.impl.Render3DEvent;
 import net.anubis.client.event.impl.TickEvent;
 import net.anubis.client.module.ClientModule;
@@ -36,11 +38,18 @@ import net.anubis.client.util.TracerEngine;
 import net.anubis.client.util.playerbypass2.SimulationSignals;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.FallingBlock;
+import net.minecraft.block.InfestedBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.network.packet.s2c.play.BlockBreakingProgressS2CPacket;
 import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.ColorHelper;
@@ -73,6 +82,15 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private static final float HIDDEN_FULL_ACTIVITY = 24.0F;
    /** A pinned (exact) hidden player is not replaced by a vaguer field peak for this long. */
    private static final long PIN_HOLD_MS = 10000L;
+   /** Block changes count as someone digging out of sight only this far below the surface... */
+   private static final int HIDDEN_CHANGE_DEPTH = 4;
+   /** ...and at least this far from you and every player you can see. */
+   private static final double HIDDEN_CHANGE_CLEARANCE = 8.0;
+   /** More changes than this in one chunk in one tick is an explosion or a command, not a player. */
+   private static final int HIDDEN_CHANGE_BURST = 5;
+   /** Changes needed in a chunk before it is flagged, and where the signal reaches full strength. */
+   private static final int HIDDEN_CHANGE_MIN = 3;
+   private static final float HIDDEN_CHANGE_FULL = 8.0F;
 
    private final NumberSetting threshold = this.addSetting("min-probability", new NumberSetting("Min Probability %", 40.0F, 10.0F, 95.0F).step(5.0F));
    private final NumberSetting range = this.addSetting("range", new NumberSetting("Range", 512.0F, 64.0F, 2048.0F).step(16.0F));
@@ -102,6 +120,9 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final Long2ObjectOpenHashMap<Sighting> sightings = new Long2ObjectOpenHashMap<>();
    private final Long2ObjectOpenHashMap<Hidden> hidden = new Long2ObjectOpenHashMap<>();
    private long pinSeen;
+   private final LongArrayList pendingChanges = new LongArrayList();
+   private final LongArrayList pendingBreakers = new LongArrayList();
+   private final Long2ObjectOpenHashMap<Digging> digging = new Long2ObjectOpenHashMap<>();
    private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
    private final LongOpenHashSet queued = new LongOpenHashSet();
    private final Long2IntOpenHashMap dirtyAt = new Long2IntOpenHashMap();
@@ -143,6 +164,9 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.reports.clear();
       this.sightings.clear();
       this.hidden.clear();
+      this.pendingChanges.clear();
+      this.pendingBreakers.clear();
+      this.digging.clear();
       this.queue.clear();
       this.queued.clear();
       this.dirtyAt.clear();
@@ -194,7 +218,80 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
          if (!this.dirtyAt.containsKey(key)) {
             this.dirtyAt.put(key, this.ticks);
          }
+
+         if (this.watchingHidden() && this.outOfSightChange(event.pos, event.oldState, event.newState)) {
+            this.pendingChanges.add(event.pos.asLong());
+         }
       }
+   }
+
+   /** The server tells nearby players who is breaking a block; a breaker you have no entity for is hidden from you. */
+   @EventHandler
+   public void onPacketReceive(PacketReceiveEvent event) {
+      if (this.scanning && this.watchingHidden() && event.packet instanceof BlockBreakingProgressS2CPacket progress) {
+         this.pendingBreakers.add(progress.getPos().asLong());
+         this.pendingBreakers.add(progress.getEntityId());
+      }
+   }
+
+   private boolean watchingHidden() {
+      return this.scanPlayers.get() && this.hiddenPlayers.get();
+   }
+
+   /** A block mined out or placed underground with nobody you can see near it. */
+   private boolean outOfSightChange(BlockPos pos, BlockState was, BlockState now) {
+      if (was == null || now == null || was.getBlock() == now.getBlock()) {
+         return false;
+      }
+
+      boolean broke = now.isAir() && !was.isAir();
+      boolean placed = was.isAir() && !now.isAir();
+      if (!broke && !placed || natural(broke ? was : now, placed)) {
+         return false;
+      }
+
+      MinecraftClient mc = MinecraftClient.getInstance();
+      ClientWorld level = mc.world;
+      if (level == null || mc.player == null) {
+         return false;
+      }
+
+      WorldChunk chunk = level.getChunkManager().getWorldChunk(pos.getX() >> 4, pos.getZ() >> 4);
+      if (chunk == null || pos.getY() > chunk.sampleHeightmap(Heightmap.Type.WORLD_SURFACE, pos.getX() & 15, pos.getZ() & 15) - HIDDEN_CHANGE_DEPTH) {
+         return false;
+      }
+
+      Vec3d center = Vec3d.ofCenter(pos);
+      double clearance = HIDDEN_CHANGE_CLEARANCE * HIDDEN_CHANGE_CLEARANCE;
+
+      for (AbstractClientPlayerEntity player : level.getPlayers()) {
+         if (player.squaredDistanceTo(center) < clearance) {
+            return false;
+         }
+      }
+
+      return true;
+   }
+
+   /** Changes the world makes by itself: fluids, falling blocks, growth, decay, fire, mobs, pistons. */
+   private static boolean natural(BlockState state, boolean placed) {
+      Block block = state.getBlock();
+      if (!state.getFluidState().isEmpty() || block instanceof FallingBlock || block instanceof InfestedBlock
+         || state.isIn(BlockTags.ENDERMAN_HOLDABLE) || state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.CROPS) || state.isIn(BlockTags.FIRE)
+         || state.isIn(BlockTags.ICE) || state.isIn(BlockTags.SNOW) || state.isIn(BlockTags.CAVE_VINES)) {
+         return true;
+      }
+
+      if (block == Blocks.MOVING_PISTON || block == Blocks.PISTON_HEAD || block == Blocks.POINTED_DRIPSTONE || block == Blocks.SCULK
+         || block == Blocks.SCULK_VEIN || block == Blocks.SCULK_SENSOR || block == Blocks.SCULK_SHRIEKER || block == Blocks.GLOW_LICHEN
+         || block == Blocks.VINE || block == Blocks.SMALL_AMETHYST_BUD || block == Blocks.MEDIUM_AMETHYST_BUD || block == Blocks.LARGE_AMETHYST_BUD
+         || block == Blocks.AMETHYST_CLUSTER || block == Blocks.BROWN_MUSHROOM || block == Blocks.RED_MUSHROOM || block == Blocks.TURTLE_EGG
+         || block == Blocks.SNIFFER_EGG || block == Blocks.FROGSPAWN || block == Blocks.BUBBLE_COLUMN) {
+         return true;
+      }
+
+      // Lava meeting water makes these on its own.
+      return placed && (block == Blocks.COBBLESTONE || block == Blocks.STONE || block == Blocks.OBSIDIAN || block == Blocks.BASALT);
    }
 
    @EventHandler
@@ -319,8 +416,11 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
     * attackers or item pickups pin one exactly.
     */
    private void trackHidden(MinecraftClient mc, ClientWorld level) {
-      if (!this.scanPlayers.get() || !this.hiddenPlayers.get()) {
+      if (!this.watchingHidden()) {
          SimulationSignals.unsubscribe(this);
+         this.pendingChanges.clear();
+         this.pendingBreakers.clear();
+         this.digging.clear();
          this.dropHidden();
          return;
       }
@@ -331,29 +431,86 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       }
 
       SimulationSignals.tick(this);
+      long now = System.currentTimeMillis();
+      this.collectBreakers(mc, level, now);
+      this.collectChanges(now);
+      // Player Bypass 2's ring inference only works in the overworld; the two checks above work everywhere.
       if (PlayerBypass2Module.netherOrEnd(level)) {
          this.pinSeen = SimulationSignals.pinTotal();
-         this.dropHidden();
-         return;
-      }
-
-      long now = System.currentTimeMillis();
-      SimulationSignals.pinsSince(this.pinSeen, pin -> {
-         BlockPos pos = pin.pos();
-         String detail = pin.detail();
-         int at = detail.indexOf(" @ ");
-         long key = ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4);
-         this.hidden.put(key, new Hidden(1.0F, at < 0 ? detail : detail.substring(0, at), now, pos.asLong()));
-         this.rankDirty = true;
-      });
-      this.pinSeen = SimulationSignals.pinTotal();
-      if (this.ticks % RANK_EVERY_TICKS == 0) {
-         this.inferHidden(mc.player, now);
+      } else {
+         SimulationSignals.pinsSince(this.pinSeen, pin -> {
+            BlockPos pos = pin.pos();
+            String detail = pin.detail();
+            int at = detail.indexOf(" @ ");
+            this.markHidden(pos, 1.0F, at < 0 ? detail : detail.substring(0, at), now);
+         });
+         this.pinSeen = SimulationSignals.pinTotal();
+         if (this.ticks % RANK_EVERY_TICKS == 0) {
+            this.inferHidden(mc.player, now);
+         }
       }
 
       long memory = (long)(this.playerMemory.get() * 1000.0F);
+      this.digging.values().removeIf(d -> now - d.lastAt() > memory);
       if (this.hidden.values().removeIf(h -> now - h.seenAt() > memory)) {
          this.rankDirty = true;
+      }
+   }
+
+   private void markHidden(BlockPos pos, float strength, String detail, long now) {
+      this.hidden.put(ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4), new Hidden(strength, detail, now, pos.asLong()));
+      this.rankDirty = true;
+   }
+
+   /** Block-breaking progress from an entity id you were never sent: a player mining out of your sight, at any depth. */
+   private void collectBreakers(MinecraftClient mc, ClientWorld level, long now) {
+      for (int i = 0; i + 1 < this.pendingBreakers.size(); i += 2) {
+         int id = (int)this.pendingBreakers.getLong(i + 1);
+         if (id != mc.player.getId() && level.getEntityById(id) == null) {
+            this.markHidden(BlockPos.fromLong(this.pendingBreakers.getLong(i)), 1.0F, "mining out of sight", now);
+         }
+      }
+
+      this.pendingBreakers.clear();
+   }
+
+   /** Underground blocks mined or placed with nobody visible nearby, grouped by chunk; bursts (explosions) are dropped. */
+   private void collectChanges(long now) {
+      if (this.pendingChanges.isEmpty()) {
+         return;
+      }
+
+      Long2IntOpenHashMap perChunk = new Long2IntOpenHashMap();
+      Long2ObjectOpenHashMap<BlockPos> latest = new Long2ObjectOpenHashMap<>();
+
+      for (int i = 0; i < this.pendingChanges.size(); i++) {
+         BlockPos pos = BlockPos.fromLong(this.pendingChanges.getLong(i));
+         long key = ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4);
+         perChunk.addTo(key, 1);
+         latest.put(key, pos);
+      }
+
+      this.pendingChanges.clear();
+      long memory = (long)(this.playerMemory.get() * 1000.0F);
+      var it = perChunk.long2IntEntrySet().fastIterator();
+
+      while (it.hasNext()) {
+         var entry = it.next();
+         if (entry.getIntValue() > HIDDEN_CHANGE_BURST) {
+            continue;
+         }
+
+         long key = entry.getLongKey();
+         Digging was = this.digging.get(key);
+         int count = (was == null || now - was.lastAt() > memory ? 0 : was.count()) + entry.getIntValue();
+         this.digging.put(key, new Digging(count, now));
+         if (count >= HIDDEN_CHANGE_MIN) {
+            Hidden current = this.hidden.get(key);
+            float strength = Math.min(1.0F, 0.4F + 0.6F * count / HIDDEN_CHANGE_FULL);
+            if (current == null || current.strength() <= strength || now - current.seenAt() > PIN_HOLD_MS) {
+               this.markHidden(latest.get(key), strength, count + " blocks dug or placed out of sight", now);
+            }
+         }
       }
    }
 
@@ -624,6 +781,10 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    /** A player inferred but not seen; {@code pos} is 0 when only the chunk is known. */
    @Environment(EnvType.CLIENT)
    private record Hidden(float strength, String detail, long seenAt, long pos) {
+   }
+
+   @Environment(EnvType.CLIENT)
+   private record Digging(int count, long lastAt) {
    }
 
    @Environment(EnvType.CLIENT)

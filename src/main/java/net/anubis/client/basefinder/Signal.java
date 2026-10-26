@@ -11,7 +11,7 @@ import net.fabricmc.api.Environment;
 @Environment(EnvType.CLIENT)
 public enum Signal {
    PLAYER("Player underground", 0.70F, 1, Group.PLAYERS),
-   HIDDEN_PLAYER("Hidden player activity", 0.50F, 1, Group.PLAYERS),
+   HIDDEN_PLAYER("Hidden player activity", 0.65F, 1, Group.PLAYERS),
    STORAGE("Player storage", 0.60F, 3, Group.BLOCKS),
    ROTATED_DEEPSLATE("Rotated deepslate", 0.55F, 3, Group.BLOCKS),
    TUNNEL("Hand-mined tunnel", 0.50F, 2, Group.TUNNELS),

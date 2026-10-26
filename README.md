@@ -60,7 +60,7 @@ Each loaded chunk gets a probability from independent signals:
 | Signal | What it means |
 |---|---|
 | Player underground | Another player is (or recently was) well below the surface here |
-| Hidden player activity | Player Bypass 2's inference: chunks outside your simulation distance keep ticking around here, or a player you can't see hit a mob / picked up an item (overworld only, toggle **Hidden Players**) |
+| Hidden player activity | A player you can't see, at any depth: the server reports someone mining a block but never sent you that player, or blocks keep being dug/placed underground with no visible player within 8 blocks (explosions, fluids, falling blocks and growth are ignored). In the overworld also Player Bypass 2's inference: chunks outside your simulation distance keep ticking, or a hidden player hit a mob / picked up an item. Toggle **Hidden Players** |
 | Player storage | Shulkers, ender chests, buried chests/barrels (lone ones on the surface count once, so scattered junk doesn't inflate a chunk) |
 | Surface build | Concrete, stained glass, quartz or metal blocks lined up 3+ in a row above ground (walls, floors, pillars); single scattered blocks are ignored |
 | Rotated deepslate | Natural deepslate is always vertical; sideways means placed |
