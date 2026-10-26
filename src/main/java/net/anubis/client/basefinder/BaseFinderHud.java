@@ -115,7 +115,8 @@ public final class BaseFinderHud {
       float rowH = bodyPx + smallPx + 8.0F * s;
       int rows = Math.min(entries.size(), style.rows());
       float headerH = bodyPx + 10.0F * s;
-      float h = pad * 2.0F + headerH + (rows == 0 ? smallPx + 4.0F * s : rows * rowH);
+      float noteH = style.note() == null ? 0.0F : smallPx + 6.0F * s;
+      float h = pad * 2.0F + headerH + noteH + (rows == 0 ? smallPx + 4.0F * s : rows * rowH);
       this.card(dl, x, y, w, h, s);
       float ty = y + pad;
       int accent = GuiPalette.accent();
@@ -125,6 +126,10 @@ public final class BaseFinderHud {
       dl.addText(small, smallPx, x + w - pad - width(small, smallPx, count), ty + (bodyPx - smallPx) * 0.5F, MUTED, count);
       ty += headerH;
       dl.addRectFilled(x + pad, ty - 5.0F * s, x + w - pad, ty - 5.0F * s + 1.0F, BORDER);
+      if (style.note() != null) {
+         dl.addText(small, smallPx, x + pad, ty, MUTED, fit(small, smallPx, style.note(), w - pad * 2.0F));
+         ty += noteH;
+      }
       if (rows == 0) {
          dl.addText(small, smallPx, x + pad, ty, MUTED, "No suspicious chunks yet");
          return;
@@ -203,6 +208,7 @@ public final class BaseFinderHud {
    }
 
    @Environment(EnvType.CLIENT)
-   public record Style(boolean panel, boolean dots, float x, float y, int rows, float scale) {
+   /** {@code note}, when set, is a muted line under the panel header (e.g. how much underground the server hides). */
+   public record Style(boolean panel, boolean dots, float x, float y, int rows, float scale, String note) {
    }
 }

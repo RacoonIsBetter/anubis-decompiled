@@ -151,6 +151,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final LongArrayList pendingChanges = new LongArrayList();
    private final LongArrayList pendingBreakers = new LongArrayList();
    private final LongArrayList pendingOpens = new LongArrayList();
+   /** Chunks whose underground the server is hiding (sent as plain deepslate or air). */
+   private final LongOpenHashSet masked = new LongOpenHashSet();
    private Long2ObjectOpenHashMap<EntityEvidence> entityEvidence = new Long2ObjectOpenHashMap<>();
    private final Long2ObjectOpenHashMap<Digging> digging = new Long2ObjectOpenHashMap<>();
    private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
@@ -197,6 +199,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.pendingChanges.clear();
       this.pendingBreakers.clear();
       this.pendingOpens.clear();
+      this.masked.clear();
       this.digging.clear();
       this.entityEvidence = new Long2ObjectOpenHashMap<>();
       this.queue.clear();
@@ -296,6 +299,11 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
          }
       }
 
+      // While the server hides a chunk's underground, its "changes" are the server revealing real blocks.
+      if (pos.getY() < 16 && this.masked.contains(ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4))) {
+         return false;
+      }
+
       MinecraftClient mc = MinecraftClient.getInstance();
       ClientWorld level = mc.world;
       if (level == null || mc.player == null) {
@@ -373,6 +381,9 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       }
 
       this.trackHidden(mc, level);
+      if (this.ticks % 200 == 0) {
+         this.masked.removeIf(k -> !LevelUtil.isLoaded(level, ChunkPos.getPackedX(k), ChunkPos.getPackedZ(k)));
+      }
       if (this.ticks % ENTITY_SCAN_TICKS == 0) {
          this.scanEntities(mc, level);
       }
@@ -417,6 +428,12 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
                WorldChunk chunk = level.getChunkManager().getWorldChunk(cx, cz);
                if (chunk != null) {
                   ChunkReport report = this.scanner.scan(level, chunk, options);
+                  if (this.scanner.masked()) {
+                     this.masked.add(key);
+                  } else {
+                     this.masked.remove(key);
+                  }
+
                   if (report == null) {
                      this.reports.remove(key);
                   } else {
@@ -924,8 +941,10 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
 
    @Override
    public void renderHudOverlay(ImDrawList dl, float screenW, float screenH) {
+      int hiddenBelow = this.masked.size();
       BaseFinderHud.Style style = new BaseFinderHud.Style(
-         this.panel.get(), this.dots.get(), this.panelX.get(), this.panelY.get(), this.panelRows.getInt(), this.panelScale.get()
+         this.panel.get(), this.dots.get(), this.panelX.get(), this.panelY.get(), this.panelRows.getInt(), this.panelScale.get(),
+         hiddenBelow == 0 ? null : "Server hides underground in " + hiddenBelow + (hiddenBelow == 1 ? " chunk" : " chunks")
       );
       this.hud.render(dl, screenW, screenH, this.ranked, style);
    }

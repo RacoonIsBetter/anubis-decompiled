@@ -77,6 +77,7 @@ public final class BaseEvidenceScanner {
 
    private final Map<Block, Byte> categories = new IdentityHashMap<>();
    private final int[] surface = new int[256];
+   private boolean masked;
    private final int[] found = new int[CATEGORY_COUNT];
    private final long[] firstAt = new long[CATEGORY_COUNT];
    private byte[] grid = new byte[0];
@@ -97,6 +98,7 @@ public final class BaseEvidenceScanner {
          Arrays.fill(this.grid, 0, gridHeight * 256, AIR);
       }
 
+      this.masked = false;
       Arrays.fill(this.found, 0);
       Arrays.fill(this.firstAt, 0L);
       int oceanColumns = 0;
@@ -122,11 +124,22 @@ public final class BaseEvidenceScanner {
 
       for (int i = 0; i < sections.length; i++) {
          ChunkSection section = sections[i];
+         int baseY = bottomSection + i << 4;
          if (section == null || section.isEmpty()) {
+            // Some plugins send the hidden underground as air instead; a whole empty section below Y=0 never generates.
+            if (baseY < 0) {
+               this.masked = true;
+            }
+
             continue;
          }
 
-         int baseY = bottomSection + i << 4;
+         // Anti-xray / anti-freecam plugins (DonutSMP's, ChunkVeil, Phantom) send the underground as
+         // nothing but deepslate until you can see it. Real deepslate layers always have tuff, ores or gravel.
+         if (baseY < 0 && !section.hasAny(state -> !state.isAir() && !state.isOf(Blocks.DEEPSLATE))) {
+            this.masked = true;
+         }
+
          boolean inGrid = wantGrid && baseY + 15 >= gridMin && baseY <= gridMax;
          if (!inGrid && !section.hasAny(this::interesting)) {
             continue;
@@ -255,6 +268,11 @@ public final class BaseEvidenceScanner {
    private boolean structure() {
       return this.found[MARK_STRONGHOLD] > 0 || this.found[MARK_ANCIENT_CITY] > 0 || this.found[MARK_TRIAL] > 0 || this.found[MARK_MONUMENT] > 0
          || this.found[MARK_SPAWNER] > 0 && this.found[MARK_MOSSY_COBBLE] > 0;
+   }
+
+   /** Whether the last scanned chunk had underground sections the server replaced with plain deepslate. */
+   public boolean masked() {
+      return this.masked;
    }
 
    private void scoreBlocks(ChunkReport report, boolean ocean) {
