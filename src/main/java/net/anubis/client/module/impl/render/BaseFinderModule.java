@@ -77,6 +77,7 @@ import net.minecraft.util.math.ColorHelper;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
+import net.minecraft.world.LightType;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.debug.gizmo.Gizmo;
@@ -310,8 +311,17 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
          return false;
       }
 
+      if (nearFireOrLava(level, pos)) {
+         return false;
+      }
+
       WorldChunk chunk = level.getChunkManager().getWorldChunk(pos.getX() >> 4, pos.getZ() >> 4);
       if (chunk == null || pos.getY() > chunk.sampleHeightmap(Heightmap.Type.WORLD_SURFACE, pos.getX() & 15, pos.getZ() & 15) - HIDDEN_CHANGE_DEPTH) {
+         return false;
+      }
+
+      // Under trees the heightmap is the canopy; only count places the sky does not reach.
+      if (level.getLightLevel(LightType.SKY, pos) > 7) {
          return false;
       }
 
@@ -326,6 +336,24 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
 
       // Zombies and villagers open wooden doors; anything alive right next to the block may have done it.
       return level.getEntitiesByClass(LivingEntity.class, new Box(pos).expand(2.0), e -> !(e instanceof PlayerEntity)).isEmpty();
+   }
+
+   /** Lava sets nearby wood, azaleas and moss on fire underground; burnt blocks vanish on their own. */
+   private static boolean nearFireOrLava(ClientWorld level, BlockPos pos) {
+      BlockPos.Mutable at = new BlockPos.Mutable();
+
+      for (int dx = -3; dx <= 3; dx++) {
+         for (int dy = -3; dy <= 3; dy++) {
+            for (int dz = -3; dz <= 3; dz++) {
+               BlockState state = level.getBlockState(at.set(pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz));
+               if (state.isIn(BlockTags.FIRE) || state.isOf(Blocks.LAVA)) {
+                  return true;
+               }
+            }
+         }
+      }
+
+      return false;
    }
 
    /** Doors, trapdoors, gates and barrels opened or closed, or a lever flipped: only hands (or redstone) do that. */
@@ -345,7 +373,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       Block block = state.getBlock();
       if (!state.getFluidState().isEmpty() || block instanceof FallingBlock || block instanceof InfestedBlock
          || state.isIn(BlockTags.ENDERMAN_HOLDABLE) || state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.CROPS) || state.isIn(BlockTags.FIRE)
-         || state.isIn(BlockTags.ICE) || state.isIn(BlockTags.SNOW) || state.isIn(BlockTags.CAVE_VINES)) {
+         || state.isIn(BlockTags.ICE) || state.isIn(BlockTags.SNOW) || state.isIn(BlockTags.CAVE_VINES) || state.isIn(BlockTags.FLOWERS)
+         || state.isIn(BlockTags.REPLACEABLE) || state.isIn(BlockTags.SAPLINGS)) {
          return true;
       }
 
@@ -1005,7 +1034,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
          }
 
          if (this.farmed > 0) {
-            float strength = 0.4F + 0.6F * (this.farmed - FARM_MIN_ANIMALS) / (FARM_FULL_ANIMALS - FARM_MIN_ANIMALS);
+            float strength = 0.8F + 0.2F * (this.farmed - FARM_MIN_ANIMALS) / (FARM_FULL_ANIMALS - FARM_MIN_ANIMALS);
             live.put(Signal.ANIMAL_FARM, strength, this.farmed + " " + this.farmType);
          }
       }

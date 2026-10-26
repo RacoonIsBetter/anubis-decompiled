@@ -33,7 +33,7 @@ public final class BaseEvidenceScanner {
    private static final int GRID_MAX_Y = 72;
    private static final int SHAFT_MIN_HEIGHT = 10;
    private static final int LONG_DRIPSTONE = 8;
-   /** Side of the square floor a dug-out room must have, all at one floor and one ceiling height. */
+   /** Side of the square floor a dug-out room must have, all at one floor and one ceiling height (3 or 4 blocks up). */
    private static final int ROOM_SIZE = 5;
    /** A surface block only counts as part of a build when it sits in a straight line of this many. */
    private static final int SURFACE_LINE = 3;
@@ -42,6 +42,8 @@ public final class BaseEvidenceScanner {
    private static final byte AIR = 0;
    private static final byte SOLID = 1;
    private static final byte OTHER = 2;
+   /** Full solid blocks that cave and mineshaft floors are made of (dirt, moss, clay, gravel, sand). */
+   private static final byte SOFT = 3;
 
    private static final byte NONE = 0;
    private static final byte STORAGE_ANY = 1;
@@ -73,7 +75,11 @@ public final class BaseEvidenceScanner {
    private static final byte SIGN = 26;
    private static final byte PORTAL = 27;
    private static final byte FARMLAND = 28;
-   private static final byte CATEGORY_COUNT = 29;
+   /** Rails and cobwebs: a mineshaft runs through the chunk. */
+   private static final byte MARK_MINESHAFT = 29;
+   /** Wall torches on planks: mineshaft supports carry these, players' bases sometimes do. */
+   private static final byte PLANK_TORCH = 30;
+   private static final byte CATEGORY_COUNT = 31;
 
    private final Map<Block, Byte> categories = new IdentityHashMap<>();
    private final int[] surface = new int[256];
@@ -154,7 +160,7 @@ public final class BaseEvidenceScanner {
                for (int x = 0; x < 16; x++) {
                   BlockState state = section.getBlockState(x, y, z);
                   if (gridRow) {
-                     this.grid[rowOffset + (z << 4 | x)] = state.isAir() ? AIR : state.isOpaqueFullCube() ? SOLID : OTHER;
+                     this.grid[rowOffset + (z << 4 | x)] = state.isAir() ? AIR : state.isOpaqueFullCube() ? soft(state) ? SOFT : SOLID : OTHER;
                   }
 
                   if (state.isAir()) {
@@ -189,9 +195,20 @@ public final class BaseEvidenceScanner {
                         }
                      }
                      case MARK_STRONGHOLD, MARK_ANCIENT_CITY, MARK_TRIAL, MARK_RUINED_PORTAL, MARK_MONUMENT, MARK_SPAWNER,
-                        MARK_MOSSY_COBBLE -> this.note(category, pos);
+                        MARK_MOSSY_COBBLE, MARK_MINESHAFT -> this.note(category, pos);
+                     case LIGHT -> {
+                        if (buried) {
+                           int plank = state.isOf(Blocks.WALL_TORCH) ? this.plankTorch(level, state, baseX + x, worldY, baseZ + z) : 0;
+                           // Two torches facing away from one plank is a mineshaft support beam: not a player.
+                           if (plank == 0) {
+                              this.note(LIGHT, pos);
+                           } else if (plank == 1) {
+                              this.note(PLANK_TORCH, pos);
+                           }
+                        }
+                     }
                      case SIGN, PORTAL -> this.note(category, pos);
-                     case STORAGE_BURIED, CHEST, UTILITY_BURIED, REDSTONE, LIGHT, BUILDING, OBSIDIAN, FARMLAND -> {
+                     case STORAGE_BURIED, CHEST, UTILITY_BURIED, REDSTONE, BUILDING, OBSIDIAN, FARMLAND -> {
                         if (buried) {
                            this.note(category, pos);
                         }
@@ -255,9 +272,11 @@ public final class BaseEvidenceScanner {
       }
 
       if (wantGrid) {
-         this.scanTunnels(report, baseX, baseZ, gridMin, gridHeight, options.tunnelLength());
+         // On a masked chunk the fake deepslate below Y=0 is a perfectly flat floor; only look above it.
+         int first = this.masked ? Math.max(1, 1 - gridMin) : 1;
+         this.scanTunnels(report, baseX, baseZ, gridMin, gridHeight, options.tunnelLength(), first);
          if (!this.structure()) {
-            this.scanRooms(report, baseX, baseZ, gridMin, gridHeight);
+            this.scanRooms(report, baseX, baseZ, gridMin, gridHeight, first);
          }
       }
 
@@ -267,7 +286,12 @@ public final class BaseEvidenceScanner {
    /** Strongholds, ancient cities, trial chambers, dungeons and monuments have flat rooms and decorations of their own. */
    private boolean structure() {
       return this.found[MARK_STRONGHOLD] > 0 || this.found[MARK_ANCIENT_CITY] > 0 || this.found[MARK_TRIAL] > 0 || this.found[MARK_MONUMENT] > 0
-         || this.found[MARK_SPAWNER] > 0 && this.found[MARK_MOSSY_COBBLE] > 0;
+         || this.dungeon();
+   }
+
+   /** A dungeon's spawner is often in the next chunk over; its mossy cobblestone floor is enough. */
+   private boolean dungeon() {
+      return this.found[MARK_SPAWNER] > 0 || this.found[MARK_MOSSY_COBBLE] > 0;
    }
 
    /** Whether the last scanned chunk had underground sections the server replaced with plain deepslate. */
@@ -279,7 +303,8 @@ public final class BaseEvidenceScanner {
       boolean stronghold = this.found[MARK_STRONGHOLD] > 0;
       boolean ancientCity = this.found[MARK_ANCIENT_CITY] > 0;
       boolean trial = this.found[MARK_TRIAL] > 0;
-      boolean dungeon = this.found[MARK_SPAWNER] > 0 && this.found[MARK_MOSSY_COBBLE] > 0;
+      boolean dungeon = this.dungeon();
+      boolean ruinedPortal = this.found[MARK_RUINED_PORTAL] > 0;
       boolean structure = stronghold || ancientCity || trial;
       boolean surfaceBuild = this.found[SURFACE_BUILD] >= SURFACE_BUILD_MIN;
       this.give(report, Signal.ROTATED_DEEPSLATE, DEEPSLATE);
@@ -294,12 +319,15 @@ public final class BaseEvidenceScanner {
       this.giveSurface(report, Signal.UTILITY, UTILITY_SURFACE, surfaceBuild);
       if (!structure) {
          this.give(report, Signal.STORAGE, STORAGE_BURIED);
-         if (!dungeon && !ocean) {
+         if (!dungeon && !ocean && !ruinedPortal) {
             this.give(report, Signal.STORAGE, CHEST);
          }
 
          this.give(report, Signal.UTILITY, UTILITY_BURIED);
          this.give(report, Signal.LIGHTING, LIGHT);
+         if (this.found[MARK_MINESHAFT] == 0) {
+            this.give(report, Signal.LIGHTING, PLANK_TORCH);
+         }
          if (!ocean) {
             this.give(report, Signal.BUILDING, BUILDING);
          }
@@ -374,8 +402,8 @@ public final class BaseEvidenceScanner {
     * Straight 1-wide, 2-tall corridors with solid floor, ceiling and walls, and 1x1 vertical
     * shafts walled on all four sides. Caves almost never make these; players do constantly.
     */
-   private void scanTunnels(ChunkReport report, int baseX, int baseZ, int gridMin, int height, int minLength) {
-      for (int y = 1; y + 2 < height; y++) {
+   private void scanTunnels(ChunkReport report, int baseX, int baseZ, int gridMin, int height, int minLength, int first) {
+      for (int y = first; y + 2 < height; y++) {
          for (int z = 1; z < 15; z++) {
             int run = 0;
 
@@ -409,7 +437,7 @@ public final class BaseEvidenceScanner {
          for (int x = 1; x < 15; x++) {
             int run = 0;
 
-            for (int y = 1; y < height - 1; y++) {
+            for (int y = first; y < height - 1; y++) {
                boolean deep = gridMin + y <= this.surface[z << 4 | x] - TUNNEL_DEPTH;
                if (deep && this.at(x, y, z) == AIR && this.walled(x, y, z)) {
                   if (++run == SHAFT_MIN_HEIGHT) {
@@ -427,10 +455,10 @@ public final class BaseEvidenceScanner {
     * Deep rooms with a flat solid floor and a flat solid ceiling over at least a 5x5 area. Caves are
     * never that even; players clearing out a base are.
     */
-   private void scanRooms(ChunkReport report, int baseX, int baseZ, int gridMin, int height) {
+   private void scanRooms(ChunkReport report, int baseX, int baseZ, int gridMin, int height, int first) {
       boolean[] used = new boolean[256];
 
-      for (int y = 1; y + 4 < height; y++) {
+      for (int y = first; y + 4 < height; y++) {
          Arrays.fill(used, false);
 
          for (int z0 = 0; z0 + ROOM_SIZE <= 16; z0++) {
@@ -464,8 +492,13 @@ public final class BaseEvidenceScanner {
                return false;
             }
 
-            int top = y + 2;
-            while (top < y + 4 && this.at(x, top, z) == AIR) {
+            // At least 3 blocks of headroom: caves leave flat 2-high sheets, players dig rooms taller.
+            if (this.at(x, y + 2, z) != AIR) {
+               return false;
+            }
+
+            int top = y + 3;
+            if (this.at(x, top, z) == AIR) {
                top++;
             }
 
@@ -485,17 +518,22 @@ public final class BaseEvidenceScanner {
          return false;
       }
 
-      if (this.at(x, y, z) != AIR || this.at(x, y + 1, z) != AIR || this.at(x, y - 1, z) != SOLID || this.at(x, y + 2, z) != SOLID) {
+      if (this.at(x, y, z) != AIR || this.at(x, y + 1, z) != AIR || !this.solid(x, y - 1, z) || !this.solid(x, y + 2, z)) {
          return false;
       }
 
       return alongX
-         ? this.at(x, y, z - 1) == SOLID && this.at(x, y, z + 1) == SOLID && this.at(x, y + 1, z - 1) == SOLID && this.at(x, y + 1, z + 1) == SOLID
-         : this.at(x - 1, y, z) == SOLID && this.at(x + 1, y, z) == SOLID && this.at(x - 1, y + 1, z) == SOLID && this.at(x + 1, y + 1, z) == SOLID;
+         ? this.solid(x, y, z - 1) && this.solid(x, y, z + 1) && this.solid(x, y + 1, z - 1) && this.solid(x, y + 1, z + 1)
+         : this.solid(x - 1, y, z) && this.solid(x + 1, y, z) && this.solid(x - 1, y + 1, z) && this.solid(x + 1, y + 1, z);
    }
 
    private boolean walled(int x, int y, int z) {
-      return this.at(x - 1, y, z) == SOLID && this.at(x + 1, y, z) == SOLID && this.at(x, y, z - 1) == SOLID && this.at(x, y, z + 1) == SOLID;
+      return this.solid(x - 1, y, z) && this.solid(x + 1, y, z) && this.solid(x, y, z - 1) && this.solid(x, y, z + 1);
+   }
+
+   private boolean solid(int x, int y, int z) {
+      byte v = this.at(x, y, z);
+      return v == SOLID || v == SOFT;
    }
 
    private byte at(int x, int y, int z) {
@@ -512,6 +550,23 @@ public final class BaseEvidenceScanner {
       }
 
       return length;
+   }
+
+   private static boolean soft(BlockState state) {
+      return state.isIn(BlockTags.DIRT) || state.isOf(Blocks.CLAY) || state.isOf(Blocks.GRAVEL) || state.isIn(BlockTags.SAND);
+   }
+
+   /** 0: not on planks, 1: on planks, 2: on planks with a twin torch on the far side (mineshaft beam). */
+   private int plankTorch(ClientWorld level, BlockState torch, int x, int y, int z) {
+      Direction facing = torch.get(Properties.HORIZONTAL_FACING);
+      int sx = x - facing.getOffsetX();
+      int sz = z - facing.getOffsetZ();
+      if (!level.getBlockState(this.cursor.set(sx, y, sz)).isIn(BlockTags.PLANKS)) {
+         return 0;
+      }
+
+      BlockState twin = level.getBlockState(this.cursor.set(sx - facing.getOffsetX(), y, sz - facing.getOffsetZ()));
+      return twin.isOf(Blocks.WALL_TORCH) && twin.get(Properties.HORIZONTAL_FACING) == facing.getOpposite() ? 2 : 1;
    }
 
    private boolean interesting(BlockState state) {
@@ -586,6 +641,8 @@ public final class BaseEvidenceScanner {
          return MARK_SPAWNER;
       } else if (block == Blocks.MOSSY_COBBLESTONE) {
          return MARK_MOSSY_COBBLE;
+      } else if (block == Blocks.RAIL || block == Blocks.COBWEB) {
+         return MARK_MINESHAFT;
       }
 
       String path = Registries.BLOCK.getId(block).getPath();
@@ -595,7 +652,7 @@ public final class BaseEvidenceScanner {
          return CRAFTED_BUILDING;
       }
 
-      if (path.endsWith("_concrete") || path.endsWith("glass") || path.endsWith("glass_pane") || path.endsWith("_wool") || path.endsWith("_carpet")
+      if (path.endsWith("_concrete") || path.endsWith("glass") || path.endsWith("glass_pane") || path.endsWith("_wool") || path.endsWith("_carpet") && !path.contains("moss")
          || path.equals("bricks") || path.equals("quartz_block") || path.equals("smooth_stone") || path.startsWith("polished_blackstone")) {
          return BUILDING;
       }
