@@ -91,6 +91,7 @@ import net.anubis.client.module.impl.render.AtmosphereModule;
 import net.anubis.client.module.impl.render.BlockEntityDebugModule;
 import net.anubis.client.module.impl.render.BlockEspModule;
 import net.anubis.client.module.impl.render.BlockOverlayModule;
+import net.anubis.client.module.impl.render.BaseFinderModule;
 import net.anubis.client.module.impl.render.ChunkScannerModule;
 import net.anubis.client.module.impl.render.ColorGradingModule;
 import net.anubis.client.module.impl.render.CustomCrosshairModule;
@@ -222,6 +223,7 @@ public final class BuiltinModuleProvider implements ModuleProvider {
          new SkinChangeModule(),
          new SpawnerNotifierModule(),
          new SusChunkFinderModule(),
+         new BaseFinderModule(),
          new ChunkScannerModule(),
          new PrimeChunkFinderModule(),
          new BlockEntityDebugModule(),

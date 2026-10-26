@@ -48,3 +48,26 @@ Output: `build/libs/anubis-0.9.9.1+mc1.21.11.jar`.
 - Two lambdas were reported as "processed twice" by Vineflower
   (`ConnectionsPanel.importFile`, `AuctionHouse.listSome`). They decompiled, but are the
   first places to look if the compiler complains.
+
+## Base Finder (`anubis-modded` branch)
+
+A new module in the **Base Finding** category that combines several signals into one ranked
+list, in the style of Prestige V5's base finder. It is an original implementation; no code was
+taken from Prestige or from the Glazed addon (whose license forbids redistribution).
+
+Each loaded chunk gets a probability from independent signals:
+
+| Signal | What it means |
+|---|---|
+| Player underground | Another player is (or recently was) well below the surface here |
+| Player storage | Shulkers, ender chests, buried chests/barrels |
+| Rotated deepslate | Natural deepslate is always vertical; sideways means placed |
+| Hand-mined tunnel / shaft | Straight 1x2 corridors or 1x1 shafts with solid walls, deep underground |
+| Crafted blocks, Redstone, Placed lights, Building blocks | Player blocks buried below the surface |
+| Grown amethyst / kelp, long dripstone | Growth that only happens while players keep the chunk loaded |
+| Obsidian | Weak signal, ignored next to ruined portals |
+
+Chunks with strongholds, ancient cities, trial chambers, dungeons and ocean monuments have the
+matching false positives suppressed. Flagged chunks get a soft tile at the depth of the
+evidence and a dot; aim at the dot to see why the chunk was flagged. A panel (top left by
+default) lists the most likely chunks with distance and direction.
