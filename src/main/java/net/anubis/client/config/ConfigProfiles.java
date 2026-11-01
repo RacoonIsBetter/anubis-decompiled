@@ -78,6 +78,7 @@ public final class ConfigProfiles {
    public static final String TOO_OLD = "Made by an old Anubis - old configs no longer work";
    private static final String UPGRADED_MARKER = ".format2";
    private static final String PRESETS_MARKER = ".presets";
+   private static final String PRIVATE_MARKER = ".private-values-removed";
    private static final int MAX_NAME = 32;
    private static final int MAX_FRIENDS = 1000;
    private static final long MAX_LOCAL_BYTES = 33554432L;
@@ -89,6 +90,7 @@ public final class ConfigProfiles {
    private List<ConfigProfiles.Profile> cached;
    private boolean upgradeChecked;
    private boolean presetsChecked;
+   private boolean privateChecked;
 
    private ConfigProfiles() {
       this(ModuleConfigStore.getInstance());
@@ -706,6 +708,11 @@ public final class ConfigProfiles {
    }
 
    private void write(String name, ConfigProfiles.Contents contents) throws ProfileException {
+      JsonElement modules = contents.data.get(ConfigProfiles.Part.MODULES);
+      if (modules != null && modules.isJsonObject()) {
+         contents.data.put(ConfigProfiles.Part.MODULES, ModuleConfigStore.withoutPrivateValues(modules.getAsJsonObject()));
+      }
+
       JsonObject root = new JsonObject();
       root.addProperty("anubisProfile", 2);
       JsonArray servers = new JsonArray();
@@ -803,6 +810,7 @@ public final class ConfigProfiles {
    private List<ConfigProfiles.Profile> scan() {
       Path dir = this.directory();
       this.upgradeLocalProfiles(dir);
+      this.removePrivateValues(dir);
       this.installPresets(dir);
       if (!Files.isDirectory(dir)) {
          this.headers.clear();
@@ -860,6 +868,41 @@ public final class ConfigProfiles {
             Files.writeString(marker, "Profiles here were moved to format 2.\n", StandardCharsets.UTF_8);
          } catch (IOException | RuntimeException e) {
             LOGGER.warn("[Anubis] Failed to move old profiles to the current format", e);
+         }
+      }
+   }
+
+   private void removePrivateValues(Path dir) {
+      if (!this.privateChecked) {
+         this.privateChecked = true;
+         Path marker = dir.resolve(".private-values-removed");
+
+         try {
+            if (Files.exists(marker) || !Files.isDirectory(dir)) {
+               return;
+            }
+
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(dir, "*.json")) {
+               for (Path file : files) {
+                  String fileName = file.getFileName().toString();
+                  String name = fileName.substring(0, fileName.length() - ".json".length());
+                  if (isValidName(name) && Files.isRegularFile(file) && Files.size(file) <= 33554432L) {
+                     try {
+                        ConfigProfiles.Contents contents = this.read(name);
+                        JsonElement modules = contents.data.get(ConfigProfiles.Part.MODULES);
+                        if (modules != null && modules.isJsonObject() && !ModuleConfigStore.withoutPrivateValues(modules.getAsJsonObject()).equals(modules)) {
+                           this.write(name, contents);
+                        }
+                     } catch (ProfileException e) {
+                        LOGGER.warn("[Anubis] Couldn't clean private values out of profile '{}'", name);
+                     }
+                  }
+               }
+            }
+
+            Files.writeString(marker, "Private values were removed from the profiles here.\n", StandardCharsets.UTF_8);
+         } catch (IOException | RuntimeException e) {
+            LOGGER.warn("[Anubis] Failed to clean private values out of the profiles", e);
          }
       }
    }

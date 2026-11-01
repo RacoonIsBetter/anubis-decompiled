@@ -50,11 +50,7 @@ void main() {
     if (body.a < 1.0) {
         vec2 texel = 1.0 / vec2(textureSize(SilhouetteSampler, 0));
         edge = widest(edge, texel * Shape.x, mat2(1.0));
-#ifdef ANUBIS_MOBILE_OUTLINE
-        if (Shape.x > 1.75 && edge.a < 1.0) {
-#else
         if (Shape.x > 1.75) {
-#endif
             edge = widest(edge, texel * Shape.x * 0.5, TWIST);
         }
     }

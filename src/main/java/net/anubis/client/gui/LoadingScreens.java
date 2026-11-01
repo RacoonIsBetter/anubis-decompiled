@@ -10,13 +10,13 @@ import java.util.Locale;
 import net.anubis.client.imgui.ImGuiManager;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.util.Util;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.world.LevelLoadingScreen;
 import net.minecraft.client.gui.screen.MessageScreen;
-import net.minecraft.client.gui.screen.SplashOverlay;
 import net.minecraft.client.gui.screen.ProgressScreen;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.SplashOverlay;
+import net.minecraft.client.gui.screen.world.LevelLoadingScreen;
+import net.minecraft.util.Util;
 
 @Environment(EnvType.CLIENT)
 public final class LoadingScreens {
@@ -129,48 +129,64 @@ public final class LoadingScreens {
             0.0F, 0.0F, sw, sh, EgyptDraw.col(-15857145, a), EgyptDraw.col(-15857145, a), EgyptDraw.col(-16514302, a), EgyptDraw.col(-16514302, a)
          );
          float headSize = Math.min(sh * 0.3F, 290.0F * s);
-         float sunR = headSize * 0.62F;
          float cx = sw * 0.5F;
          float cy = sh * 0.42F;
-         EgyptDraw.sunDisk(dl, cx, cy, sunR, t * 0.12F, s, a);
-         float target = progress >= 0.0F ? clamp01(progress) : (float)(t * 0.45 % 1.0);
-         if (!(progress < 0.0F) && !(target < shownFill)) {
-            shownFill = shownFill + (target - shownFill) * Math.min(1.0F, dt * 6.0F);
-         } else {
+         float ringR = headSize * 0.72F;
+         float target = progress >= 0.0F ? clamp01(progress) : (float)(t * 0.5 % 1.0);
+         if (progress < 0.0F && target < shownFill) {
             shownFill = target;
+         } else {
+            shownFill = shownFill + (target - shownFill) * Math.min(1.0F, dt * 6.0F);
+         }
+
+         float ringLine = Math.max(2.5F, 4.0F * s);
+         dl.addCircle(cx, cy, ringR, EgyptDraw.col(-12965356, a), 128, ringLine);
+         float base = (float) (-Math.PI / 2);
+         if (progress >= 0.0F) {
+            drawArc(dl, cx, cy, ringR, base, base + (float) (Math.PI * 2) * shownFill, EgyptDraw.col(-11654, a), ringLine);
+         } else {
+            float head = base + t * 2.3F;
+            drawArc(dl, cx, cy, ringR, head, head + 2.0420353F, EgyptDraw.col(-11654, a), ringLine);
          }
 
          ThemeImages.Texture head = EgyptDraw.texture("/assets/anubis/textures/gui/head.png");
-         float x0 = cx - headSize * 0.5F;
-         float y0 = cy - headSize * 0.5F;
-         float x1 = x0 + headSize;
-         float y1 = y0 + headSize;
          if (head != null) {
-            EgyptDraw.glow(dl, cx, y1 - headSize * shownFill, headSize * 0.45F, -871878, 0.12F * a);
-            dl.addImage(head.id(), x0, y0, x1, y1, 0.0F, 0.0F, 1.0F, 1.0F, EgyptDraw.col(-9743568, 0.35F * a));
-            float clipTop = y1 - headSize * shownFill;
-            dl.pushClipRect(x0, clipTop, x1, y1, true);
-            dl.addImage(head.id(), x0, y0, x1, y1, 0.0F, 0.0F, 1.0F, 1.0F, EgyptDraw.col(-1, a));
+            float x0 = cx - headSize * 0.5F;
+            float y0 = cy - headSize * 0.5F;
+            float x1 = x0 + headSize;
+            float y1 = y0 + headSize;
+            dl.addImage(head.id(), x0, y0, x1, y1, 0.0F, 0.0F, 1.0F, 1.0F, EgyptDraw.col(-9539986, a));
+            dl.addImage(head.id(), x0, y0, x1, y1, 0.0F, 0.0F, 1.0F, 1.0F, EgyptDraw.col(-871878, shownFill * a));
+            float band = (float)(t * 0.5 % 1.0);
+            float bandW = headSize * 0.2F;
+            float bcx = x0 + band * headSize;
+            dl.pushClipRect(bcx - bandW * 0.5F, y0, bcx + bandW * 0.5F, y1, true);
+            dl.addImage(head.id(), x0, y0, x1, y1, 0.0F, 0.0F, 1.0F, 1.0F, EgyptDraw.col(-11654, (0.3F + 0.35F * shownFill) * a));
             dl.popClipRect();
          }
 
          ImFont big = ImGuiManager.getInstance().menuFont();
          ImFont small = ImGuiManager.getInstance().menuTagFont();
-         float nameY = cy + sunR * 1.34F + 14.0F * s;
+         float nameY = cy + ringR + 34.0F * s;
          EgyptDraw.drawSpaced(dl, big, cx, nameY, "ANUBIS CLIENT", 5.0F * s, -871878, a, true);
          float bigSize = big != null ? big.getFontSize() : 24.0F * s;
-         float barW = 260.0F * s;
-         float barY = nameY + bigSize + 16.0F * s;
-         float line = Math.max(1.0F, 1.5F * s);
-         float bx = cx - barW * 0.5F;
-         dl.addLine(bx, barY, bx + barW, barY, EgyptDraw.col(-871878, 0.18F * a), line);
-         float end = progress >= 0.0F ? bx + barW * shownFill : bx + barW * (0.5F + 0.5F * (float)Math.sin(t * 2.2F));
-         float start = progress >= 0.0F ? bx : Math.max(bx, end - barW * 0.25F);
-         dl.addLine(start, barY, end, barY, EgyptDraw.col(-11654, a), line);
-         float d = 3.5F * s;
-         dl.addQuadFilled(end, barY - d, end + d, barY, end, barY + d, end - d, barY, EgyptDraw.col(-11654, a));
          String line2 = progress >= 0.0F ? status + "  ·  " + Math.round(clamp01(progress) * 100.0F) + "%" : status;
-         EgyptDraw.drawSpaced(dl, small, cx, barY + 12.0F * s, line2.toUpperCase(Locale.ROOT), 2.0F * s, -7372954, a, false);
+         EgyptDraw.drawSpaced(dl, small, cx, nameY + bigSize + 10.0F * s, line2.toUpperCase(Locale.ROOT), 2.0F * s, -7372954, a, false);
+      }
+   }
+
+   private static void drawArc(ImDrawList dl, float cx, float cy, float r, float a0, float a1, int color, float thickness) {
+      int segments = Math.max(2, (int)(Math.abs(a1 - a0) / (Math.PI * 2) * 128.0));
+      float prevX = cx + (float)Math.cos(a0) * r;
+      float prevY = cy + (float)Math.sin(a0) * r;
+
+      for (int i = 1; i <= segments; i++) {
+         float ang = a0 + (a1 - a0) * i / segments;
+         float x = cx + (float)Math.cos(ang) * r;
+         float y = cy + (float)Math.sin(ang) * r;
+         dl.addLine(prevX, prevY, x, y, color, thickness);
+         prevX = x;
+         prevY = y;
       }
    }
 

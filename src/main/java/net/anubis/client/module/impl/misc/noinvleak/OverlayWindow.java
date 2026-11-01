@@ -2,9 +2,11 @@ package net.anubis.client.module.impl.misc.noinvleak;
 
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.sun.jna.platform.win32.Advapi32Util;
 import com.sun.jna.platform.win32.GDI32;
 import com.sun.jna.platform.win32.Kernel32;
 import com.sun.jna.platform.win32.User32;
+import com.sun.jna.platform.win32.WinReg;
 import com.sun.jna.platform.win32.WinDef.HBITMAP;
 import com.sun.jna.platform.win32.WinDef.HDC;
 import com.sun.jna.platform.win32.WinDef.HINSTANCE;
@@ -16,6 +18,7 @@ import com.sun.jna.platform.win32.WinUser.BLENDFUNCTION;
 import com.sun.jna.platform.win32.WinUser.SIZE;
 import com.sun.jna.platform.win32.WinUser.WNDCLASSEX;
 import com.sun.jna.platform.win32.WinUser.WindowProc;
+import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
 import com.sun.jna.win32.StdCallLibrary;
 import com.sun.jna.win32.W32APIOptions;
@@ -27,6 +30,9 @@ import org.lwjgl.glfw.GLFWNativeWin32;
 
 @Environment(EnvType.CLIENT)
 final class OverlayWindow {
+   private static final int FIRST_EXCLUDING_BUILD = 19041;
+   private static final int ERROR_CLASS_ALREADY_EXISTS = 1410;
+   private static int build = -1;
    private static final String CLASS_NAME = "AnubisNoInvLeakOverlay";
    private static final int WS_EX_TOOLWINDOW = 128;
    private static final int WS_EX_NOACTIVATE = 134217728;
@@ -48,13 +54,18 @@ final class OverlayWindow {
    private boolean visible;
 
    OverlayWindow(long glfwWindow) {
+      int windows = windowsBuild();
+      if (windows > 0 && windows < 19041) {
+         throw new OverlayWindow.Unsupported("Windows build " + windows + " cannot hide a window from capture (needs 19041, Windows 10 2004, or newer)");
+      }
+
       HINSTANCE instance = Kernel32.INSTANCE.GetModuleHandle(null);
       if (!classRegistered) {
          WNDCLASSEX cls = new WNDCLASSEX();
          cls.lpfnWndProc = PROC;
          cls.hInstance = instance;
          cls.lpszClassName = "AnubisNoInvLeakOverlay";
-         if (User32.INSTANCE.RegisterClassEx(cls).intValue() == 0) {
+         if (User32.INSTANCE.RegisterClassEx(cls).intValue() == 0 && Native.getLastError() != 1410) {
             throw failure("RegisterClassEx");
          }
 
@@ -68,9 +79,16 @@ final class OverlayWindow {
       }
 
       if (!OverlayWindow.Affinity.INSTANCE.SetWindowDisplayAffinity(this.hwnd, 17)) {
-         RuntimeException failure = failure("SetWindowDisplayAffinity");
+         int error = Native.getLastError();
          this.destroy();
-         throw failure;
+         throw new OverlayWindow.Unsupported("SetWindowDisplayAffinity failed with error " + error);
+      }
+
+      IntByReference applied = new IntByReference();
+      if (OverlayWindow.Affinity.INSTANCE.GetWindowDisplayAffinity(this.hwnd, applied) && applied.getValue() != 17) {
+         int value = applied.getValue();
+         this.destroy();
+         throw new OverlayWindow.Unsupported("capture exclusion did not stick (affinity reads back as 0x" + Integer.toHexString(value) + ")");
       }
 
       this.blend.BlendOp = 0;
@@ -103,6 +121,10 @@ final class OverlayWindow {
          }
 
          this.previousBitmap = GDI32.INSTANCE.SelectObject(this.memory, this.bitmap);
+         if (this.previousBitmap == null) {
+            throw failure("SelectObject");
+         }
+
          this.capacityWidth = nextWidth;
          this.capacityHeight = nextHeight;
          this.bitsPointer = bitsOut.getValue();
@@ -174,8 +196,47 @@ final class OverlayWindow {
       }
    }
 
+   String describe() {
+      if (this.hwnd == null) {
+         return "no window";
+      }
+
+      IntByReference applied = new IntByReference(-1);
+      boolean read = OverlayWindow.Affinity.INSTANCE.GetWindowDisplayAffinity(this.hwnd, applied);
+
+      int dpi;
+      try {
+         dpi = OverlayWindow.Affinity.INSTANCE.GetDpiForWindow(this.hwnd);
+      } catch (UnsatisfiedLinkError old) {
+         dpi = -1;
+      }
+
+      return "affinity 0x"
+         + (read ? Integer.toHexString(applied.getValue()) : "?")
+         + ", dpi "
+         + dpi
+         + ", visible "
+         + User32.INSTANCE.IsWindowVisible(this.hwnd);
+   }
+
+   static int windowsBuild() {
+      if (build >= 0) {
+         return build;
+      }
+
+      try {
+         build = Integer.parseInt(
+            Advapi32Util.registryGetStringValue(WinReg.HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "CurrentBuildNumber").trim()
+         );
+      } catch (RuntimeException | LinkageError unknown) {
+         build = 0;
+      }
+
+      return build;
+   }
+
    private static RuntimeException failure(String call) {
-      return new IllegalStateException(call + " failed with error " + Kernel32.INSTANCE.GetLastError());
+      return new IllegalStateException(call + " failed with error " + Native.getLastError());
    }
 
    @Environment(EnvType.CLIENT)
@@ -183,5 +244,16 @@ final class OverlayWindow {
       OverlayWindow.Affinity INSTANCE = (OverlayWindow.Affinity)Native.load("user32", OverlayWindow.Affinity.class, W32APIOptions.DEFAULT_OPTIONS);
 
       boolean SetWindowDisplayAffinity(HWND var1, int var2);
+
+      boolean GetWindowDisplayAffinity(HWND var1, IntByReference var2);
+
+      int GetDpiForWindow(HWND var1);
+   }
+
+   @Environment(EnvType.CLIENT)
+   static final class Unsupported extends RuntimeException {
+      Unsupported(String message) {
+         super(message);
+      }
    }
 }

@@ -106,6 +106,10 @@ public abstract class Setting {
       return this.sessionOnly;
    }
 
+   public final boolean isSecret() {
+      return false;
+   }
+
    public final void captureDefault() {
       if (this.defaultValue == null) {
          this.defaultValue = this.serialize();

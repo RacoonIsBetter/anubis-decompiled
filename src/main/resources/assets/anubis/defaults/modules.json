@@ -55,21 +55,9 @@
         "notifications": true
       }
     },
-    "render-distance-toggle": {
-      "keybind": 66,
-      "settings": {
-        "low-distance": 4.0
-      }
-    },
     "trident-util": {
       "settings": {
         "scale": 0.1
-      }
-    },
-    "quantum": {
-      "settings": {
-        "advanced-debug": true,
-        "render": false
       }
     },
     "amethyst-bypass": {
@@ -412,10 +400,7 @@
       }
     },
     "floating-relics": {
-      "enabled": true,
-      "settings": {
-        "symbols": "Larp"
-      }
+      "enabled": false
     },
     "time-changer": {
       "settings": {

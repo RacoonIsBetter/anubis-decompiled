@@ -21,6 +21,7 @@ import net.anubis.client.module.impl.combat.crystal.Combo;
 import net.anubis.client.module.impl.combat.crystal.CrystalDamage;
 import net.anubis.client.module.impl.combat.crystal.Crystals;
 import net.anubis.client.module.impl.combat.crystal.HurtClock;
+import net.anubis.client.module.impl.combat.crystal.LootGuard;
 import net.anubis.client.module.impl.combat.crystal.ShotView;
 import net.anubis.client.module.impl.combat.melee.MeleeAttacks;
 import net.anubis.client.module.impl.combat.melee.SlotReturn;
@@ -32,22 +33,22 @@ import net.anubis.client.util.pvp.RotationUtils;
 import net.anubis.client.util.pvp.ServerRotation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.RespawnAnchorBlock;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.world.World;
-import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.block.RespawnAnchorBlock;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.world.World;
 
 @Environment(EnvType.CLIENT)
 public final class AnchorAuraModule extends ClientModule implements HudOverlayProvider {
@@ -55,10 +56,14 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
    private static final int ARM_TICKS = 2;
    private static final int HOLD_TICKS = 10;
    private static final int MAX_LEAD_TICKS = 5;
+   private static final int AIM_TIMEOUT_TICKS = 12;
+   private static final int SKIP_TICKS = 40;
    private final NumberSetting minDamage = this.addSetting("min-damage", new NumberSetting("Min Damage", 6.0F, 0.0F, 20.0F).step(0.5F));
    private final NumberSetting maxSelfDamage = this.addSetting("max-self-damage", new NumberSetting("Max Self Damage", 6.0F, 0.0F, 20.0F).step(0.5F));
    private final BooleanSetting render = this.addSetting("render", new BooleanSetting("Render", true));
    private final ColorSetting renderColor = this.addSetting("render-color", new ColorSetting("Render Color", -26052));
+   private final NumberSetting turnSpeed = this.addSetting("turn-speed", new NumberSetting("Turn Speed", 4.5F, 1.0F, 10.0F).step(0.5F));
+   private final BooleanSetting protectLoot = this.addSetting("protect-loot", new BooleanSetting("Protect Loot", true));
    private final SlotReturn slots = new SlotReturn(this);
    private final ShotView view = new ShotView();
    private int tick;
@@ -67,9 +72,18 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
    private int spentUntil;
    private float aimTurn;
    private float placedTurn;
+   private BlockPos aimingAt;
+   private int aimingTicks;
+   private BlockPos skipped;
+   private int skippedUntil;
    private List<CrystalDamage.Victim> lastTargets;
    private List<CrystalDamage.Victim> lastSpared;
    private int lastRtt;
+   private float steerMin;
+   private float steerSelf;
+   private int steerUntil = -1;
+   private float tickMin;
+   private float tickSelf;
 
    public AnchorAuraModule() {
       super("anchor-aura", "Anchor Aura", "Places, charges and detonates respawn anchors on nearby enemies.", ModuleCategory.COMBAT);
@@ -88,6 +102,10 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
       this.tick++;
       MinecraftClient mc = MinecraftClient.getInstance();
       ClientPlayerEntity player = mc.player;
+      if (player != null && mc.world != null) {
+         LootGuard.update(mc.world, player);
+      }
+
       CrystalAuraModule crystal = ModuleRegistry.get(CrystalAuraModule.class);
       if ((crystal == null || !crystal.isEnabled())
          && MeleeAttacks.canAct(mc)
@@ -101,7 +119,10 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
             this.slots.tick(mc, true);
          }
 
-         if (!MeleeAttacks.actedThisTick(player) && MeleeAttacks.handsFree(mc, player) && !player.shouldCancelInteraction() && !MeleeAttacks.rightClickComing(mc)) {
+         if (!MeleeAttacks.actedThisTick(player)
+            && MeleeAttacks.handsFree(mc, player)
+            && !player.shouldCancelInteraction()
+            && !MeleeAttacks.rightClickComing(mc)) {
             Combo.Shot shot = Combo.pick(this.shots(mc, player, Combo.enemies(mc, player), Combo.friends(mc, player), Crystals.rttTicks(mc, player), 0.0F));
             if (shot == null) {
                if (this.spent != null && this.tick < this.spentUntil && mc.world.getBlockState(this.spent).isOf(Blocks.RESPAWN_ANCHOR)) {
@@ -115,11 +136,23 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
                this.show(shot);
                if (CombatMacroLock.tryAcquire(this)) {
                   if (!this.ready(mc, player, shot)) {
-                     ServerRotation.request(RotationUtils.fromTo(player.getEyePos(), shot.aim()));
-                  } else if (shot.route() == -2 || this.slots.take(player, shot.route())) {
-                     this.fire(mc, player, shot);
-                     this.holdUntil = this.tick + 10;
-                     ServerRotation.request(ServerRotation.sent());
+                     BlockPos cell = cellOf(shot);
+                     this.aimingTicks = cell.equals(this.aimingAt) ? this.aimingTicks + 1 : 0;
+                     this.aimingAt = cell;
+                     if (this.aimingTicks >= 12) {
+                        this.skipped = cell;
+                        this.skippedUntil = this.tick + 40;
+                        this.aimingAt = null;
+                     } else {
+                        ServerRotation.request(RotationUtils.fromTo(player.getEyePos(), shot.aim()), this.turnSpeed.get());
+                     }
+                  } else {
+                     this.aimingAt = null;
+                     if (shot.route() == -2 || this.slots.take(player, shot.route())) {
+                        this.fire(mc, player, shot);
+                        this.holdUntil = this.tick + 10;
+                        ServerRotation.request(ServerRotation.sent());
+                     }
                   }
                }
             }
@@ -155,9 +188,17 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
       this.view.label(dl, screenW, screenH);
    }
 
+   private static BlockPos cellOf(Combo.Shot shot) {
+      return shot.plan() instanceof AnchorGuard.Spot spot ? spot.pos() : (BlockPos)shot.plan();
+   }
+
+   private boolean ruledOut(BlockPos cell) {
+      return cell.equals(this.skipped) && this.tick < this.skippedUntil || this.protectLoot.get() && LootGuard.near(Vec3d.ofCenter(cell));
+   }
+
    public void show(Combo.Shot shot) {
       if (this.render.get()) {
-         BlockPos cell = shot.plan() instanceof AnchorGuard.Spot spot ? spot.pos() : (BlockPos)shot.plan();
+         BlockPos cell = cellOf(shot);
          Vec3d center = Vec3d.ofCenter(cell);
          float most = 0.0F;
 
@@ -170,8 +211,17 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
       }
    }
 
+   public void steer(ClientPlayerEntity player, float minDamage, float maxSelf) {
+      this.steerMin = minDamage;
+      this.steerSelf = maxSelf;
+      this.steerUntil = player.age + 2;
+   }
+
    public List<Combo.Shot> shots(MinecraftClient mc, ClientPlayerEntity player, List<LivingEntity> enemies, List<LivingEntity> friends, int rtt, float rival) {
       ClientWorld level = mc.world;
+      boolean steered = player.age <= this.steerUntil;
+      this.tickMin = steered ? this.steerMin : this.minDamage.get();
+      this.tickSelf = steered ? this.steerSelf : this.maxSelfDamage.get();
       PlayerInventory inventory = player.getInventory();
       ItemStack main = player.getMainHandStack();
       int detonator = AnchorGuard.detonatorRoute(inventory, main);
@@ -192,18 +242,20 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
          boolean existing = false;
 
          for (BlockPos cell : this.anchors(level, player, enemies)) {
-            Vec3d aim = AnchorGuard.anchorAim(level, player, cell);
-            if (aim != null && this.safe(this.lastSpared, cell)) {
-               boolean charged = (Integer)level.getBlockState(cell).get(RespawnAnchorBlock.CHARGES) > 0;
-               int ahead = charged ? 0 : 1;
-               AnchorAuraModule.Blast due = this.blast(cell, ahead, false);
-               if (due != null || this.blast(cell, ahead, true) != null) {
-                  existing = true;
-                  if (due != null) {
-                     if (charged) {
-                        shots.add(new Combo.Shot(Combo.Kind.DETONATE, aim, detonator, due.value(), due.kills(), 0, cell));
-                     } else if (glowstone != -1 && HurtClock.opensIn(due.source(), rtt) <= 1 && (rival <= 0.0F || due.value() > rival + 1.0F)) {
-                        shots.add(new Combo.Shot(Combo.Kind.CHARGE, aim, glowstone, due.value(), due.kills(), 1, cell));
+            if (!this.ruledOut(cell)) {
+               Vec3d aim = AnchorGuard.anchorAim(level, player, cell);
+               if (aim != null && this.safe(this.lastSpared, cell)) {
+                  boolean charged = level.getBlockState(cell).get(RespawnAnchorBlock.CHARGES) > 0;
+                  int ahead = charged ? 0 : 1;
+                  AnchorAuraModule.Blast due = this.blast(cell, ahead, false);
+                  if (due != null || this.blast(cell, ahead, true) != null) {
+                     existing = true;
+                     if (due != null) {
+                        if (charged) {
+                           shots.add(new Combo.Shot(Combo.Kind.DETONATE, aim, detonator, due.value(), due.kills(), 0, cell));
+                        } else if (glowstone != -1 && HurtClock.opensIn(due.source(), rtt) <= 1 && (rival <= 0.0F || due.value() > rival + 1.0F)) {
+                           shots.add(new Combo.Shot(Combo.Kind.CHARGE, aim, glowstone, due.value(), due.kills(), 1, cell));
+                        }
                      }
                   }
                }
@@ -244,7 +296,7 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
          BlockPos cell = (BlockPos)shot.plan();
          BlockState state = level.getBlockState(cell);
          if (state.isOf(Blocks.RESPAWN_ANCHOR) && AnchorGuard.anchorHit(level, player, cell) != null) {
-            boolean charged = (Integer)state.get(RespawnAnchorBlock.CHARGES) > 0;
+            boolean charged = state.get(RespawnAnchorBlock.CHARGES) > 0;
             return shot.kind() == Combo.Kind.CHARGE ? !charged : charged && this.safe(this.lastSpared, cell) && this.blast(cell, 0, false) != null;
          } else {
             return false;
@@ -288,7 +340,12 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
          BlockPos feet = victim.entity().getBlockPos();
 
          for (BlockPos pos : BlockPos.iterate(feet.add(-2, -1, -2), feet.add(2, 2, 2))) {
-            if (!bounds.containsKey(pos) && level.getBlockState(pos).isAir() && player.canInteractWithBlockAt(pos, -0.01) && !reservedAt(reserved, pos)) {
+            if (!bounds.containsKey(pos)
+               && level.getBlockState(pos).isAir()
+               && player.canInteractWithBlockAt(pos, -0.01)
+               && !reservedAt(reserved, pos)
+               && !this.ruledOut(pos)
+               && !this.walkedInto(level, pos)) {
                float bound = this.upperValue(Vec3d.ofCenter(pos));
                if (bound >= 0.0F) {
                   bounds.put(pos.toImmutable(), bound);
@@ -390,7 +447,7 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
 
       for (CrystalDamage.Victim other : spared) {
          float damage = other.damage(center, 5.0F, cell);
-         if (damage > this.maxSelfDamage.get() || CrystalDamage.endangers((PlayerEntity)other.entity(), damage)) {
+         if (damage > this.tickSelf || CrystalDamage.endangers((PlayerEntity)other.entity(), damage)) {
             return false;
          }
       }
@@ -399,7 +456,7 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
    }
 
    private float needed(LivingEntity enemy) {
-      return Math.min(this.minDamage.get(), CrystalDamage.health(enemy));
+      return Math.min(this.tickMin, CrystalDamage.health(enemy));
    }
 
    private static List<CrystalDamage.Victim> victims(List<LivingEntity> entities, int rtt) {
@@ -411,6 +468,22 @@ public final class AnchorAuraModule extends ClientModule implements HudOverlayPr
       }
 
       return victims;
+   }
+
+   private boolean walkedInto(ClientWorld level, BlockPos pos) {
+      Box cell = new Box(pos);
+      int lead = Math.min(this.lastRtt, 5);
+
+      for (PlayerEntity other : level.getPlayers()) {
+         if (!other.isSpectator() && !(other instanceof ClientPlayerEntity)) {
+            Box box = other.getBoundingBox();
+            if (box.intersects(cell) || box.offset(Combo.lead(other, lead)).intersects(cell)) {
+               return true;
+            }
+         }
+      }
+
+      return false;
    }
 
    private static boolean reservedAt(List<Box> reserved, BlockPos pos) {

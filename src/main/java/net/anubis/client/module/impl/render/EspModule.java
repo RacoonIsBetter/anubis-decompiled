@@ -2,7 +2,6 @@ package net.anubis.client.module.impl.render;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,22 +15,20 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
-import net.anubis.client.util.StableTopK;
 import net.anubis.client.util.TracerEngine;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.DrawStyle;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.Monster;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
+import net.minecraft.world.debug.gizmo.GizmoDrawing;
 
 @Environment(EnvType.CLIENT)
 public final class EspModule extends ClientModule {
@@ -60,8 +57,6 @@ public final class EspModule extends ClientModule {
    private final NumberSetting sFillAlpha = this.addSetting("fill-alpha", new NumberSetting("Fill Alpha", 0.3F, 0.0F, 1.0F).step(0.05F));
    private final NumberSetting sLineWidth = this.addSetting("line-width", new NumberSetting("Line Width", 1.5F, 0.5F, 5.0F).step(0.5F));
    private final Map<Entity, Integer> glowing = new IdentityHashMap<>();
-   private final StableTopK<EspModule.Target> mobileTargets = new StableTopK<>(PRIORITY);
-   private final Map<Integer, DrawStyle> mobileStyles = new HashMap<>();
    private long glowFrame = -1L;
    private ClientWorld glowLevel;
 
@@ -122,8 +117,6 @@ public final class EspModule extends ClientModule {
 
    private void resetGlow() {
       this.glowing.clear();
-      this.mobileTargets.reset(0);
-      this.mobileStyles.clear();
       this.glowFrame = -1L;
       this.glowLevel = null;
    }
@@ -136,28 +129,18 @@ public final class EspModule extends ClientModule {
          String shape = this.sShape.get();
          float lineWidth = this.sLineWidth.get();
          int fillAlpha = Math.round(this.sFillAlpha.get() * 255.0F);
-         boolean mobile = MobilePerformance.active();
-         if (mobile) {
-            this.mobileStyles.clear();
-         }
 
          for (EspModule.Target target : this.targets(event.partialTick)) {
             int color = this.colorFor(target);
-            Box bounds = mobile ? interpolatedBox(target.entity(), target.interpolated()) : interpolatedBox(target.entity(), event.partialTick);
+            Box bounds = interpolatedBox(target.entity(), event.partialTick);
             if (box) {
                int fill = color & 16777215 | fillAlpha << 24;
-               DrawStyle style = mobile ? this.mobileStyles.get(color) : null;
-               if (style == null) {
-                  style = switch (shape) {
-                     case "Fill" -> DrawStyle.filled(fill);
-                     case "Both" -> DrawStyle.filledAndStroked(color, lineWidth, fill);
-                     default -> DrawStyle.stroked(color, lineWidth);
-                  };
-                  if (mobile) {
-                     this.mobileStyles.put(color, style);
-                  }
-               }
 
+               DrawStyle style = switch (shape) {
+                  case "Fill" -> DrawStyle.filled(fill);
+                  case "Both" -> DrawStyle.filledAndStroked(color, lineWidth, fill);
+                  default -> DrawStyle.stroked(color, lineWidth);
+               };
                GizmoDrawing.box(bounds, style).ignoreOcclusion();
             }
 
@@ -175,12 +158,7 @@ public final class EspModule extends ClientModule {
          float range = Math.max(1.0F, this.sRange.get());
          double rangeSq = (double)range * range;
          Vec3d eye = mc.player.getCameraPosVec(partialTick);
-         boolean mobile = MobilePerformance.active();
-         if (mobile) {
-            this.mobileTargets.reset(max);
-         }
-
-         List<EspModule.Target> result = mobile ? null : new ArrayList<>();
+         List<EspModule.Target> result = new ArrayList<>();
 
          for (Entity entity : mc.world.getEntities()) {
             EspModule.Group group = groupOf(entity);
@@ -192,18 +170,9 @@ public final class EspModule extends ClientModule {
                Vec3d interpolated = entity.getLerpedPos(partialTick);
                double distanceSq = interpolated.squaredDistanceTo(eye);
                if (!(distanceSq > rangeSq)) {
-                  EspModule.Target target = new EspModule.Target(entity, group, distanceSq, mobile ? interpolated : null);
-                  if (mobile) {
-                     this.mobileTargets.offer(target);
-                  } else {
-                     result.add(target);
-                  }
+                  result.add(new EspModule.Target(entity, group, distanceSq));
                }
             }
-         }
-
-         if (mobile) {
-            return this.mobileTargets.result();
          }
 
          if (result.size() <= max) {
@@ -256,14 +225,7 @@ public final class EspModule extends ClientModule {
    private static Box interpolatedBox(Entity entity, float partialTick) {
       Vec3d current = entity.getEntityPos();
       Vec3d interpolated = entity.getLerpedPos(partialTick);
-      return entity.getBoundingBox()
-         .offset(interpolated.x - current.x, interpolated.y - current.y, interpolated.z - current.z);
-   }
-
-   private static Box interpolatedBox(Entity entity, Vec3d interpolated) {
-      Vec3d current = entity.getEntityPos();
-      return entity.getBoundingBox()
-         .offset(interpolated.x - current.x, interpolated.y - current.y, interpolated.z - current.z);
+      return entity.getBoundingBox().offset(interpolated.x - current.x, interpolated.y - current.y, interpolated.z - current.z);
    }
 
    @Environment(EnvType.CLIENT)
@@ -274,6 +236,6 @@ public final class EspModule extends ClientModule {
    }
 
    @Environment(EnvType.CLIENT)
-   private record Target(Entity entity, EspModule.Group group, double distanceSq, Vec3d interpolated) {
+   private record Target(Entity entity, EspModule.Group group, double distanceSq) {
    }
 }

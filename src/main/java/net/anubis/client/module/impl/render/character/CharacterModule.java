@@ -23,27 +23,26 @@ import net.anubis.client.module.impl.render.character.kit.Detail;
 import net.anubis.client.module.setting.ActionSetting;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ModeSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.render.entity.state.EntityRenderState;
-import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.Util;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.entity.feature.FeatureRenderer;
-import net.minecraft.client.render.entity.feature.StuckObjectsFeatureRenderer;
-import net.minecraft.client.world.ClientWorld;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.entity.feature.ArmorFeatureRenderer;
 import net.minecraft.client.render.entity.feature.CapeFeatureRenderer;
-import net.minecraft.client.render.entity.feature.HeadFeatureRenderer;
 import net.minecraft.client.render.entity.feature.Deadmau5FeatureRenderer;
 import net.minecraft.client.render.entity.feature.ElytraFeatureRenderer;
-import net.minecraft.client.render.entity.feature.ShoulderParrotFeatureRenderer;
+import net.minecraft.client.render.entity.feature.FeatureRenderer;
+import net.minecraft.client.render.entity.feature.HeadFeatureRenderer;
 import net.minecraft.client.render.entity.feature.HeldItemFeatureRenderer;
+import net.minecraft.client.render.entity.feature.ShoulderParrotFeatureRenderer;
+import net.minecraft.client.render.entity.feature.StuckObjectsFeatureRenderer;
+import net.minecraft.client.render.entity.state.EntityRenderState;
+import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.Util;
 
 @Environment(EnvType.CLIENT)
 public final class CharacterModule extends ClientModule {
@@ -101,7 +100,7 @@ public final class CharacterModule extends ClientModule {
    }
 
    private Detail effectiveDetail() {
-      return MobilePerformance.active() ? Detail.LOW : Detail.byLabel(this.detail.get());
+      return Detail.byLabel(this.detail.get());
    }
 
    @Override

@@ -9,9 +9,11 @@ import net.minecraft.client.MinecraftClient;
 
 @Environment(EnvType.CLIENT)
 final class TeleportConfirm {
+   private static final long WINDOW_MS = 3000L;
    private final ClientModule owner;
    private Object pressed;
    private boolean warned;
+   private long sentAt;
 
    TeleportConfirm(ClientModule owner) {
       this.owner = owner;
@@ -20,6 +22,11 @@ final class TeleportConfirm {
    void reset() {
       this.pressed = null;
       this.warned = false;
+      this.sentAt = 0L;
+   }
+
+   void sent() {
+      this.sentAt = System.currentTimeMillis();
    }
 
    boolean tick(MinecraftClient mc) {
@@ -29,7 +36,11 @@ final class TeleportConfirm {
             return true;
          }
 
-         Dialogs.Button confirm = view.labelled("confirm", "yes", "accept");
+         if (System.currentTimeMillis() - this.sentAt > 3000L) {
+            return false;
+         }
+
+         Dialogs.Button confirm = view.labelled("confirm", "yes");
          if (confirm == null) {
             return false;
          }

@@ -7,11 +7,11 @@ import net.anubis.client.module.impl.misc.NoInvLeakModule;
 import net.anubis.client.module.impl.misc.noinvleak.StreamOverlay;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.hud.InGameHud;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Identifier;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.hud.InGameHud;
-import net.minecraft.client.gui.DrawContext;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -30,14 +30,18 @@ public abstract class MixinNoInvLeakGui {
    @Shadow
    private ItemStack currentStack;
 
-   @ModifyVariable(method = "renderHotbarItem(Lnet/minecraft/client/gui/DrawContext;IILnet/minecraft/client/render/RenderTickCounter;Lnet/minecraft/entity/player/PlayerEntity;Lnet/minecraft/item/ItemStack;I)V", at = @At("HEAD"), argsOnly = true)
+   @ModifyVariable(method = "renderHotbarItem", at = @At("HEAD"), argsOnly = true)
    private ItemStack anubis$noInvLeakHotbar(
-      ItemStack stack, @Local(argsOnly = true, ordinal = 0) int x, @Local(argsOnly = true, ordinal = 1) int y, @Local(argsOnly = true, ordinal = 2) int seed
+      ItemStack stack,
+      @Local(argsOnly = true) DrawContext guiGraphics,
+      @Local(argsOnly = true, ordinal = 0) int x,
+      @Local(argsOnly = true, ordinal = 1) int y,
+      @Local(argsOnly = true, ordinal = 2) int seed
    ) {
-      return NoInvLeakModule.hotbar(stack, x, y, seed);
+      return NoInvLeakModule.hotbar(stack, NoInvLeakModule.screenX(guiGraphics, x, y, x), NoInvLeakModule.screenY(guiGraphics, x, y, y), seed);
    }
 
-   @Inject(method = "renderHeldItemTooltip(Lnet/minecraft/client/gui/DrawContext;)V", at = @At("HEAD"), cancellable = true)
+   @Inject(method = "renderHeldItemTooltip", at = @At("HEAD"), cancellable = true)
    private void anubis$noInvLeakItemName(DrawContext guiGraphics, CallbackInfo ci) {
       if (NoInvLeakModule.hidesItemName()) {
          if (NoInvLeakModule.overlaying() && this.heldItemTooltipFade > 0 && !this.currentStack.isEmpty()) {
@@ -55,8 +59,11 @@ public abstract class MixinNoInvLeakGui {
    }
 
    @WrapWithCondition(
-      method = "renderHotbar(Lnet/minecraft/client/gui/DrawContext;Lnet/minecraft/client/render/RenderTickCounter;)V",
-      at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/DrawContext;drawGuiTexture(Lcom/mojang/blaze3d/pipeline/RenderPipeline;Lnet/minecraft/util/Identifier;IIII)V")
+      method = "renderHotbar",
+      at = @At(
+         value = "INVOKE",
+         target = "Lnet/minecraft/client/gui/DrawContext;drawGuiTexture(Lcom/mojang/blaze3d/pipeline/RenderPipeline;Lnet/minecraft/util/Identifier;IIII)V"
+      )
    )
    private boolean anubis$noInvLeakSelection(DrawContext guiGraphics, RenderPipeline pipeline, Identifier sprite, int x, int y, int width, int height) {
       if (NoInvLeakModule.hidesSelectedSlot() && ANUBIS$SELECTION.equals(sprite)) {

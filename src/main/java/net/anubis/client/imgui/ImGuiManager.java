@@ -1,15 +1,13 @@
 package net.anubis.client.imgui;
 
 import com.mojang.blaze3d.opengl.GlStateManager;
-import imgui.AnubisAndroidNative;
 import imgui.ImFont;
 import imgui.ImFontConfig;
 import imgui.ImFontGlyphRangesBuilder;
 import imgui.ImGui;
 import imgui.ImGuiIO;
 import imgui.gl3.AnubisGl3;
-import imgui.glfw.AnubisGlfw;
-import imgui.glfw.AnubisKeys;
+import imgui.glfw.ImGuiImplGlfw;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -18,17 +16,16 @@ import java.util.Arrays;
 import java.util.function.BooleanSupplier;
 import net.anubis.client.config.HudTheme;
 import net.anubis.client.config.ThemeStore;
-import net.anubis.client.gui.AndroidSystemPicker;
 import net.anubis.client.gui.GuiPalette;
 import net.anubis.client.gui.ThemeImages;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.util.Window;
-import net.minecraft.client.gui.cursor.Cursor;
-import net.minecraft.client.gui.cursor.StandardCursors;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.cursor.Cursor;
+import net.minecraft.client.gui.cursor.StandardCursors;
+import net.minecraft.client.util.Window;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWKeyCallback;
 import org.lwjgl.glfw.GLFWMonitorCallback;
@@ -50,9 +47,8 @@ public final class ImGuiManager {
    public static final float HUD_LABEL_FONT_SIZE = 14.0F;
    private static final String EXTENDED_LATIN_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ÇĞİÖŞÜçğıöşüÂâÊêÎîÔôÛûÀÁÄÈÉËÌÍÏÒÓÖÙÚÜÝàáäèéëìíïòóöùúüýÿ−∞";
    private static final float REFERENCE_HEIGHT = 1080.0F;
-   private final AnubisGlfw glfw = new AnubisGlfw() {
+   private final ImGuiImplGlfw glfw = new ImGuiImplGlfw() {
       public void keyCallback(long window, int keycode, int scancode, int action, int mods) {
-         AnubisKeys.record(window, keycode, action);
          boolean tracked = keycode >= 0 && keycode < ImGuiManager.this.imguiKeysDown.length;
          boolean feed = action == 0 ? tracked && ImGuiManager.this.imguiKeysDown[keycode] : ImGuiManager.this.feedsKeyPress(keycode, mods);
          if (!feed) {
@@ -357,7 +353,6 @@ public final class ImGuiManager {
    }
 
    public void dispose() {
-      AndroidSystemPicker.cancel();
       if (this.initialized) {
          this.gl3.shutdown();
          this.glfw.shutdown();
@@ -558,9 +553,5 @@ public final class ImGuiManager {
          System.err.println("[Anubis] Failed to load font " + resourcePath + ": " + e.getMessage());
          return null;
       }
-   }
-
-   static {
-      AnubisAndroidNative.prepare();
    }
 }

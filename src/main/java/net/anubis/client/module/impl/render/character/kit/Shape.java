@@ -109,13 +109,6 @@ public abstract class Shape {
       return (float)Math.sqrt(dx * dx + dy * dy + dz * dz);
    }
 
-   final float boundDistance(float x, float y, float z) {
-      float dx = x < this.minX ? this.minX - x : (x > this.maxX ? x - this.maxX : 0.0F);
-      float dy = y < this.minY ? this.minY - y : (y > this.maxY ? y - this.maxY : 0.0F);
-      float dz = z < this.minZ ? this.minZ - z : (z > this.maxZ ? z - this.maxZ : 0.0F);
-      return (float)Math.sqrt(dx * dx + dy * dy + dz * dz);
-   }
-
    public Shape color(int argb) {
       this.paint = Paint.of(argb);
       return this;
@@ -168,10 +161,6 @@ public abstract class Shape {
 
    public Shape roughen(float amplitude, float size) {
       return new Shapes.Roughen(this, amplitude, size);
-   }
-
-   public Shape twist(float degreesPerUnit, float cx, float cz) {
-      return new Shapes.Twist(this, degreesPerUnit, cx, cz);
    }
 
    public Shape union(Shape... others) {

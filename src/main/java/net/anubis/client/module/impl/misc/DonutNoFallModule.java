@@ -7,10 +7,10 @@ import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.Full;
 
 @Environment(EnvType.CLIENT)
@@ -23,7 +23,7 @@ public final class DonutNoFallModule extends ClientModule {
    private boolean sendingReplacement;
 
    public DonutNoFallModule() {
-      super("donut-nofall", "Donut NoFall", "Take no fall damage on DonutSMP.", ModuleCategory.DONUT);
+      super("donut-nofall", "Donut NoFall", "Take no fall damage on DonutSMP.", ModuleCategory.MOVEMENT);
    }
 
    @Override
@@ -69,11 +69,7 @@ public final class DonutNoFallModule extends ClientModule {
             this.sendingReplacement = true;
 
             try {
-               connection.sendPacket(
-                  new Full(
-                     player.getX(), player.getY(), player.getZ(), player.getYaw(), player.getPitch(), onGround, false
-                  )
-               );
+               connection.sendPacket(new Full(player.getX(), player.getY(), player.getZ(), player.getYaw(), player.getPitch(), onGround, false));
             } finally {
                this.sendingReplacement = false;
             }

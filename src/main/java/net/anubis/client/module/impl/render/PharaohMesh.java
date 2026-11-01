@@ -1,11 +1,10 @@
 package net.anubis.client.module.impl.render;
 
 import java.util.Arrays;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.OverlayTexture;
+import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.util.math.MatrixStack.Entry;
 
 @Environment(EnvType.CLIENT)
@@ -14,7 +13,6 @@ final class PharaohMesh {
    static final int INLAY = 1;
    static final int GEM = 2;
    static final int BRONZE = 3;
-   static final int FUR = 4;
    static final int MATERIALS = 5;
    static final int STYLE_NEMES = 0;
    static final int STYLE_KHEPRESH = 1;
@@ -31,8 +29,6 @@ final class PharaohMesh {
    private final byte[] material;
    private final float[] tone;
    private final int quads;
-   private PharaohMesh.Look coloredLook;
-   private int[] cachedColors;
 
    PharaohMesh(PharaohMesh.Builder b) {
       this.quads = b.quads;
@@ -48,23 +44,6 @@ final class PharaohMesh {
    }
 
    void emit(Entry pose, VertexConsumer out, int light, PharaohMesh.Look look) {
-      int[] colors = null;
-      if (MobilePerformance.active()) {
-         if (this.cachedColors == null) {
-            this.cachedColors = new int[this.quads * 4];
-         }
-
-         if (this.coloredLook != look) {
-            this.colorVertices(look, this.cachedColors);
-            this.coloredLook = look;
-         }
-
-         colors = this.cachedColors;
-      } else {
-         this.cachedColors = null;
-         this.coloredLook = null;
-      }
-
       int[] palette = look.palette();
       float gain = look.sweepGain();
       boolean glint = gain > 0.004F;
@@ -85,42 +64,6 @@ final class PharaohMesh {
          for (int v = 0; v < 4; v++) {
             int p = q * 12 + v * 3;
             float bright = base;
-            if (colors == null && metal) {
-               int s = q * 8 + v * 2;
-               float c = this.sweep[s] * sc + this.sweep[s + 1] * ss;
-               if (c > 0.0F) {
-                  c *= c;
-                  c *= c;
-                  c *= c;
-                  bright += gain * c;
-               }
-            }
-
-            out.vertex(pose, this.pos[p], this.pos[p + 1], this.pos[p + 2])
-               .color(colors == null ? tint(argb, bright) : colors[q * 4 + v])
-               .texture(CORNER_U[v], CORNER_V[v])
-               .overlay(OverlayTexture.DEFAULT_UV)
-               .light(lit)
-               .normal(pose, nx, ny, nz);
-         }
-      }
-   }
-
-   private void colorVertices(PharaohMesh.Look look, int[] colors) {
-      int[] palette = look.palette();
-      float gain = look.sweepGain();
-      float sc = look.sweepCos();
-      float ss = look.sweepSin();
-      boolean glint = gain > 0.004F;
-
-      for (int q = 0; q < this.quads; q++) {
-         int mat = this.material[q];
-         int argb = palette[mat];
-         float base = mat == 2 ? this.tone[q] * look.gemPulse() : this.tone[q];
-         boolean metal = glint && (mat == 0 || mat == 3);
-
-         for (int v = 0; v < 4; v++) {
-            float bright = base;
             if (metal) {
                int s = q * 8 + v * 2;
                float c = this.sweep[s] * sc + this.sweep[s + 1] * ss;
@@ -132,7 +75,12 @@ final class PharaohMesh {
                }
             }
 
-            colors[q * 4 + v] = tint(argb, bright);
+            out.vertex(pose, this.pos[p], this.pos[p + 1], this.pos[p + 2])
+               .color(tint(argb, bright))
+               .texture(CORNER_U[v], CORNER_V[v])
+               .overlay(OverlayTexture.DEFAULT_UV)
+               .light(lit)
+               .normal(pose, nx, ny, nz);
          }
       }
    }
@@ -172,15 +120,6 @@ final class PharaohMesh {
       }
 
       uraeus(b, -(e + 0.45F));
-      return new PharaohMesh(b);
-   }
-
-   static PharaohMesh broadCollar(boolean chest, boolean collar) {
-      PharaohMesh.Builder b = new PharaohMesh.Builder();
-      if (collar) {
-         collar(b, -2.0F - lift(chest) - 0.12F);
-      }
-
       return new PharaohMesh(b);
    }
 

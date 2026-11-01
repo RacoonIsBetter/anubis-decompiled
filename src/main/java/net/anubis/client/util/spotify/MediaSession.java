@@ -9,7 +9,7 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 
 @Environment(EnvType.CLIENT)
-public final class MediaSession {
+public final class MediaSession implements PlayerSource {
    private static final String MANAGER_CLASS = "Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager";
    private static final GUID IID_MANAGER_STATICS = WinRt.iid("2050C4EE-11A0-57DE-AED7-C97C70338245");
    private static final int STATICS_REQUEST_ASYNC = 6;
@@ -89,6 +89,7 @@ public final class MediaSession {
       return new MediaSession("spotify");
    }
 
+   @Override
    public MediaSession.Snapshot poll() {
       try {
          if (!this.prepare()) {
@@ -107,26 +108,32 @@ public final class MediaSession {
       }
    }
 
+   @Override
    public boolean togglePlayPause() {
       return this.control(20, "TryTogglePlayPauseAsync");
    }
 
+   @Override
    public boolean skipNext() {
       return this.control(16, "TrySkipNextAsync");
    }
 
+   @Override
    public boolean skipPrevious() {
       return this.control(17, "TrySkipPreviousAsync");
    }
 
+   @Override
    public String lastError() {
       return this.lastError;
    }
 
+   @Override
    public boolean isUnsupported() {
       return this.unsupported;
    }
 
+   @Override
    public void close() {
       this.closed = true;
       if (this.owner == Thread.currentThread()) {

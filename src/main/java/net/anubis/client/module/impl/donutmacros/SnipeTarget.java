@@ -3,6 +3,7 @@ package net.anubis.client.module.impl.donutmacros;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.anubis.client.module.setting.StringSetting;
@@ -15,7 +16,7 @@ import net.minecraft.registry.Registries;
 
 @Environment(EnvType.CLIENT)
 final class SnipeTarget {
-   private static final Pattern DURATION = Pattern.compile("(\\d+)\\s*([dhms])");
+   private static final Pattern DURATION = Pattern.compile("(?<!\\d)(\\d{1,5})\\s*([dhms])");
    final Item item;
    final boolean shard;
    final SnipeTarget.Preset preset;
@@ -25,6 +26,7 @@ final class SnipeTarget {
    final boolean exactEnchants;
    final long maxPrice;
    final int minMinutes;
+   private final Predicate<ItemStack> filter;
 
    private SnipeTarget(
       Item item,
@@ -35,7 +37,8 @@ final class SnipeTarget {
       List<Product.Enchant> enchants,
       boolean exactEnchants,
       long maxPrice,
-      int minMinutes
+      int minMinutes,
+      Predicate<ItemStack> filter
    ) {
       this.item = item;
       this.shard = shard;
@@ -46,13 +49,18 @@ final class SnipeTarget {
       this.exactEnchants = exactEnchants;
       this.maxPrice = maxPrice;
       this.minMinutes = minMinutes;
+      this.filter = filter;
+   }
+
+   static SnipeTarget matching(Item shown, String name, String search, Predicate<ItemStack> filter, long maxPrice) {
+      return new SnipeTarget(shown, false, null, name, search, List.of(), false, maxPrice, 0, filter);
    }
 
    static SnipeTarget parse(String rawItem, String rawEnchants, boolean exact, long maxPrice, int minMinutes) {
       List<Product.Enchant> enchants = Product.parseEnchants(rawEnchants);
       SnipeTarget.Preset preset = SnipeTarget.Preset.of(rawItem);
       if (preset != null) {
-         return new SnipeTarget(preset.item, true, preset, preset.label, preset.search, enchants, exact, maxPrice, minMinutes);
+         return new SnipeTarget(preset.item, true, preset, preset.label, preset.search, enchants, exact, maxPrice, minMinutes, null);
       }
 
       String text = rawItem == null ? "" : rawItem.trim().toLowerCase(Locale.ROOT).replace(' ', '_');
@@ -67,7 +75,7 @@ final class SnipeTarget {
       }
 
       String name = shard ? "Shard " + capitalize(text.substring("shard_".length())) : new ItemStack(item).getName().getString();
-      return new SnipeTarget(item, shard, null, name, Product.searchText(item), enchants, exact, maxPrice, shard ? minMinutes : 0);
+      return new SnipeTarget(item, shard, null, name, Product.searchText(item), enchants, exact, maxPrice, shard ? minMinutes : 0, null);
    }
 
    private static String capitalize(String path) {
@@ -87,6 +95,10 @@ final class SnipeTarget {
    }
 
    boolean sameKind(ItemStack stack) {
+      if (this.filter != null) {
+         return !stack.isEmpty() && this.filter.test(stack);
+      }
+
       if (!stack.isEmpty() && stack.isOf(this.item)) {
          String name = ServerText.key(stack.getName().getString());
          if (this.preset != null) {
@@ -107,6 +119,10 @@ final class SnipeTarget {
       }
    }
 
+   boolean timed() {
+      return this.preset != null || this.shard;
+   }
+
    boolean matches(ItemStack stack) {
       if (!this.sameKind(stack)) {
          return false;
@@ -116,35 +132,77 @@ final class SnipeTarget {
    }
 
    static int minutesLeft(ItemStack stack) {
+      List<String> lines = new ArrayList<>();
+
       for (String line : ServerText.lore(stack)) {
-         String clean = ServerText.normalize(line);
-         if (clean.contains("self destruct") || clean.contains("expire")) {
-            Matcher matcher = DURATION.matcher(clean);
-            int minutes = 0;
-            boolean found = false;
+         lines.add(ServerText.normalize(line));
+      }
 
-            while (matcher.find()) {
-               found = true;
-               int value = Integer.parseInt(matcher.group(1));
-               switch (matcher.group(2)) {
-                  case "d":
-                     minutes += value * 1440;
-                     break;
-                  case "h":
-                     minutes += value * 60;
-                     break;
-                  case "m":
-                     minutes += value;
+      List<Integer> listing = new ArrayList<>();
+
+      for (int i = 0; i < lines.size(); i++) {
+         if (lines.get(i).contains("$") || lines.get(i).contains("seller")) {
+            listing.add(i);
+         }
+      }
+
+      int best = -1;
+      int bestGap = -1;
+      int timers = 0;
+
+      for (int i = 0; i < lines.size(); i++) {
+         String line = lines.get(i);
+         boolean destruct = line.contains("destruct");
+         if (destruct || line.contains("expire")) {
+            int minutes = duration(line);
+            if (minutes >= 0) {
+               if (destruct) {
+                  return minutes;
                }
-            }
 
-            if (found) {
-               return minutes;
+               timers++;
+               int gap = Integer.MAX_VALUE;
+
+               for (int index : listing) {
+                  gap = Math.min(gap, Math.abs(index - i));
+               }
+
+               if (gap > bestGap) {
+                  bestGap = gap;
+                  best = minutes;
+               }
             }
          }
       }
 
-      return -1;
+      if (best < 0) {
+         return -1;
+      } else {
+         return !listing.isEmpty() && timers < 2 && bestGap < 2 ? -1 : best;
+      }
+   }
+
+   private static int duration(String line) {
+      Matcher matcher = DURATION.matcher(line);
+      int minutes = 0;
+      boolean found = false;
+
+      while (matcher.find()) {
+         found = true;
+         int value = Integer.parseInt(matcher.group(1));
+         switch (matcher.group(2)) {
+            case "d":
+               minutes += value * 1440;
+               break;
+            case "h":
+               minutes += value * 60;
+               break;
+            case "m":
+               minutes += value;
+         }
+      }
+
+      return found ? minutes : -1;
    }
 
    Product product(long sellPrice) {

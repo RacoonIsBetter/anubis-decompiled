@@ -13,7 +13,6 @@ import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.ModuleRegistry;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.PerformanceBudget;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -22,9 +21,7 @@ import net.minecraft.client.MinecraftClient;
 @Environment(EnvType.CLIENT)
 public final class PerformanceModule extends ClientModule implements HudOverlayProvider {
    private static volatile boolean optimizing;
-   private static volatile boolean mobileEffectsOptimizing;
    private final BooleanSetting optimize = this.addSetting("optimize-client", new BooleanSetting("Optimize Client", true));
-   private final BooleanSetting mobileEffects = this.addSetting("mobile-effects", new BooleanSetting("Optimize Mobile Effects", true));
    private final BooleanSetting showStats = this.addSetting("show-stats", new BooleanSetting("Show Stats", true));
    private final BooleanSetting frustumCulling = this.addSetting("frustum-culling", new BooleanSetting("Frustum Culling", true));
    private final NumberSetting scanBudget = this.addSetting("scan-budget-ms", new NumberSetting("Scan Budget ms", 2.0F, 0.5F, 8.0F).step(0.5F));
@@ -40,21 +37,10 @@ public final class PerformanceModule extends ClientModule implements HudOverlayP
          ModuleCategory.CLIENT
       );
       this.optimize.onChange(this::updateOptimizationState);
-      this.mobileEffects.onChange(this::updateOptimizationState);
-      this.mobileEffects.visibleWhen(() -> MobilePerformance.isAndroid() && this.optimize.get());
    }
 
    public static boolean optimizationsEnabled() {
       return optimizing;
-   }
-
-   public static boolean mobileEffectsEnabled() {
-      return mobileEffectsOptimizing;
-   }
-
-   @Override
-   public boolean enabledByDefault() {
-      return MobilePerformance.isAndroid();
    }
 
    @Override
@@ -66,12 +52,10 @@ public final class PerformanceModule extends ClientModule implements HudOverlayP
    @Override
    protected void onDisable() {
       optimizing = false;
-      mobileEffectsOptimizing = false;
    }
 
    private void updateOptimizationState() {
       optimizing = this.isEnabled() && this.optimize.get();
-      mobileEffectsOptimizing = optimizing && this.mobileEffects.get();
       this.nextStatsUpdate = 0L;
    }
 
@@ -99,7 +83,7 @@ public final class PerformanceModule extends ClientModule implements HudOverlayP
          this.statsText = String.format(
             Locale.ROOT,
             "%s  ·  %d FPS  ·  3D CPU %.2f ms%s  ·  queue %d",
-            optimizationsEnabled() ? (MobilePerformance.active() ? "Mobile Optimized" : "Optimized") : "Standard",
+            optimizationsEnabled() ? "Optimized" : "Standard",
             MinecraftClient.getInstance().getCurrentFps(),
             this.smoothedNanos / 1000000.0,
             scans,

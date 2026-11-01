@@ -5,15 +5,15 @@ import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.ClientTickEndC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 
 @Environment(EnvType.CLIENT)
 public final class AirStuckModule extends ClientModule {
    public static volatile AirStuckModule active;
 
    public AirStuckModule() {
-      super("air-stuck", "Air Stuck", "Freezes you in place, even mid-air.", ModuleCategory.DONUT);
+      super("air-stuck", "Air Stuck", "Freezes you in place, even mid-air.", ModuleCategory.MOVEMENT);
    }
 
    @Override

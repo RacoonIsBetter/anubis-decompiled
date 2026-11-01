@@ -3,18 +3,17 @@ package net.anubis.client.util.staff;
 import java.util.ArrayDeque;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.client.sound.SoundInstance;
 import net.minecraft.client.sound.SoundManager;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.sound.SoundInstance.AttenuationType;
+import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.client.sound.SoundInstance.AttenuationType;
 
 @Environment(EnvType.CLIENT)
 public final class StaffAlarm {
-   public static final String SIREN = "Siren";
    public static final String BEEP = "Beep";
    public static final String BELL = "Bell";
    public static final String GUARDIAN = "Guardian";
@@ -86,7 +85,7 @@ public final class StaffAlarm {
          float pitch;
          switch (this.mode) {
             case "Beep":
-               sound = (SoundEvent)SoundEvents.BLOCK_NOTE_BLOCK_BIT.value();
+               sound = SoundEvents.BLOCK_NOTE_BLOCK_BIT.value();
                pitch = 1.6F;
                break;
             case "Bell":
@@ -98,7 +97,7 @@ public final class StaffAlarm {
                pitch = 1.0F;
                break;
             default:
-               sound = (SoundEvent)SoundEvents.BLOCK_NOTE_BLOCK_PLING.value();
+               sound = SoundEvents.BLOCK_NOTE_BLOCK_PLING.value();
                pitch = note % 2 == 0 ? 1.5F : 1.0F;
          }
 

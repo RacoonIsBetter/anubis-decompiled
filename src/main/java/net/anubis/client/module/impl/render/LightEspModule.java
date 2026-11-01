@@ -1,9 +1,7 @@
 package net.anubis.client.module.impl.render;
 
-import it.unimi.dsi.fastutil.longs.Long2BooleanOpenHashMap;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -21,18 +19,17 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.NumberSetting;
 import net.anubis.client.util.LightSnapshot;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.SessionWorker;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.world.debug.gizmo.VisibilityConfigurable;
-import net.minecraft.client.render.DrawStyle;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Box;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.DrawStyle;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.world.debug.gizmo.GizmoDrawing;
+import net.minecraft.world.debug.gizmo.VisibilityConfigurable;
 
 @Environment(EnvType.CLIENT)
 public class LightEspModule extends ClientModule {
@@ -44,10 +41,6 @@ public class LightEspModule extends ClientModule {
    private LightSnapshot collecting;
    private long lastScanTime;
    private Map<Integer, List<Box>> renderData = Map.of();
-   private final Long2BooleanOpenHashMap mobileLoadedChunks = new Long2BooleanOpenHashMap();
-   private final DrawStyle[] mobileStyles = new DrawStyle[16];
-   private int mobileStyleColor;
-   private boolean mobileStylesReady;
    private final NumberSetting sRadius = this.addSetting("render-radius", new NumberSetting("Render Radius", 8.0F, 1.0F, 16.0F).step(1.0F));
    private final NumberSetting sMinLight = this.addSetting("min-light", new NumberSetting("Min Light", 5.0F, 1.0F, 15.0F).step(1.0F));
    private final BooleanSetting sDenoise = this.addSetting("denoise", new BooleanSetting("Denoise", true));
@@ -73,9 +66,6 @@ public class LightEspModule extends ClientModule {
       this.sessionLevel = null;
       this.collecting = null;
       this.renderData = Map.of();
-      this.mobileLoadedChunks.clear();
-      Arrays.fill(this.mobileStyles, null);
-      this.mobileStylesReady = false;
       this.lastScanTime = 0L;
    }
 
@@ -204,50 +194,21 @@ public class LightEspModule extends ClientModule {
             int baseR = base >> 16 & 0xFF;
             int baseG = base >> 8 & 0xFF;
             int baseB = base & 0xFF;
-            boolean mobile = MobilePerformance.active();
-            if (mobile) {
-               this.mobileLoadedChunks.clear();
-               if (!this.mobileStylesReady || this.mobileStyleColor != base) {
-                  Arrays.fill(this.mobileStyles, null);
-                  this.mobileStyleColor = base;
-                  this.mobileStylesReady = true;
-               }
-            }
 
             for (Entry<Integer, List<Box>> entry : data.entrySet()) {
-               int lightLevel = clampInt(entry.getKey(), 0, 15);
-               DrawStyle style = mobile ? this.mobileStyles[lightLevel] : null;
-               if (style == null) {
-                  float t = clamp01(entry.getKey().intValue() / 15.0F);
-                  int r = lerp(baseR, 255, t);
-                  int g = lerp(baseG, 255, t);
-                  int b = lerp(baseB, 255, t);
-                  int fillA = clampByte(Math.round(baseA * (0.5F + 0.5F * t)));
-                  int fill = fillA << 24 | r << 16 | g << 8 | b;
-                  int stroke = 0xFF000000 | Math.round(r * 0.45F) << 16 | Math.round(g * 0.45F) << 8 | Math.round(b * 0.45F);
-                  style = DrawStyle.filledAndStroked(stroke, 1.5F, fill);
-                  if (mobile) {
-                     this.mobileStyles[lightLevel] = style;
-                  }
-               }
+               float t = clamp01(entry.getKey().intValue() / 15.0F);
+               int r = lerp(baseR, 255, t);
+               int g = lerp(baseG, 255, t);
+               int b = lerp(baseB, 255, t);
+               int fillA = clampByte(Math.round(baseA * (0.5F + 0.5F * t)));
+               int fill = fillA << 24 | r << 16 | g << 8 | b;
+               int stroke = 0xFF000000 | Math.round(r * 0.45F) << 16 | Math.round(g * 0.45F) << 8 | Math.round(b * 0.45F);
+               DrawStyle style = DrawStyle.filledAndStroked(stroke, 1.5F, fill);
 
                for (Box box : entry.getValue()) {
                   int cx = (int)box.minX >> 4;
                   int cz = (int)box.minZ >> 4;
-                  boolean loaded;
-                  if (mobile) {
-                     long key = cx & 4294967295L | (long)cz << 32;
-                     if (this.mobileLoadedChunks.containsKey(key)) {
-                        loaded = this.mobileLoadedChunks.get(key);
-                     } else {
-                        loaded = mc.world.getChunkManager().isChunkLoaded(cx, cz);
-                        this.mobileLoadedChunks.put(key, loaded);
-                     }
-                  } else {
-                     loaded = mc.world.getChunkManager().isChunkLoaded(cx, cz);
-                  }
-
-                  if (loaded) {
+                  if (mc.world.getChunkManager().isChunkLoaded(cx, cz)) {
                      VisibilityConfigurable props = GizmoDrawing.box(box, style);
                      props.ignoreOcclusion();
                   }

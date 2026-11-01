@@ -193,10 +193,6 @@ final class Simplifier {
       this.quad[o + 9] = this.quad[o + 9] + w * d * d;
    }
 
-   int liveTriangles() {
-      return this.live;
-   }
-
    void reduce(int target) {
       this.drain(target);
       if (this.live > target && !this.relaxed) {

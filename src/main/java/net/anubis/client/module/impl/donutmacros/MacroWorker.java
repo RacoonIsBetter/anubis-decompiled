@@ -82,11 +82,19 @@ final class MacroWorker {
 
    <T> T call(Supplier<T> task) {
       this.check();
-      CompletableFuture<T> future = MinecraftClient.getInstance().submit(task);
+      Thread self = Thread.currentThread();
+      CompletableFuture<T> future = MinecraftClient.getInstance().submit(() -> {
+         if (this.thread != self) {
+            throw new MacroWorker.Cancelled();
+         } else {
+            return task.get();
+         }
+      });
 
       try {
          return future.get(10L, TimeUnit.SECONDS);
       } catch (InterruptedException e) {
+         future.cancel(false);
          Thread.currentThread().interrupt();
          throw new MacroWorker.Cancelled();
       } catch (ExecutionException e) {

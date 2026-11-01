@@ -2,9 +2,7 @@ package net.anubis.client.util.glyph;
 
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.render.Frustum;
 
 @Environment(EnvType.CLIENT)
 public final class GlyphSwarm {
@@ -163,10 +161,6 @@ public final class GlyphSwarm {
    }
 
    public void draw(GlyphCanvas canvas, float opacity, boolean halo) {
-      this.draw(canvas, opacity, halo, null);
-   }
-
-   public void draw(GlyphCanvas canvas, float opacity, boolean halo, Frustum frustum) {
       for (int i = 0; i < this.count; i++) {
          double px = this.x[i];
          double py = this.y[i];
@@ -199,13 +193,6 @@ public final class GlyphSwarm {
 
                float alpha = fade * opacity;
                if (!(alpha < 0.012F)) {
-                  if (frustum != null) {
-                     double reach = Math.abs(scale) * (halo ? 2.3F : 1.5F);
-                     if (!frustum.isVisible(new Box(px - reach, py - reach, pz - reach, px + reach, py + reach, pz + reach))) {
-                        continue;
-                     }
-                  }
-
                   int rgb = this.color[i];
                   boolean detailed = distSqr < 484.0;
                   if (halo && detailed) {

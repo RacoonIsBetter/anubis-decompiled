@@ -4,15 +4,11 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.pipeline.RenderPipeline.Builder;
-import com.mojang.blaze3d.pipeline.RenderPipeline.Snippet;
-import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.systems.RenderSystem.ShapeIndexBuffer;
-import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.vertex.VertexFormat.DrawMode;
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -20,16 +16,15 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.gl.UniformType;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.util.Identifier;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.SimpleFramebuffer;
-import net.minecraft.client.util.BufferAllocator;
+import net.minecraft.client.gl.Framebuffer;
+import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.client.gl.UniformType;
+import net.minecraft.client.render.BufferBuilder;
 import net.minecraft.client.render.BuiltBuffer;
+import net.minecraft.client.render.VertexFormats;
+import net.minecraft.client.util.BufferAllocator;
+import net.minecraft.util.Identifier;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
@@ -46,18 +41,15 @@ final class AtmosphereShaderSky {
    static final String BLACK_HOLE = "Black Hole";
    private static final List<String> THEMES = List.of("Space", "Northern Lights", "Ringed Planet", "Black Hole");
    private static final Logger LOGGER = LoggerFactory.getLogger("Anubis");
-   private static final RenderPipeline PIPELINE = skyPipeline(-1);
-   private static final RenderPipeline[] MOBILE_PIPELINES = new RenderPipeline[]{skyPipeline(0), skyPipeline(1), skyPipeline(2), skyPipeline(3)};
-   private static final RenderPipeline COMPOSITE = RenderPipeline.builder(new Snippet[0])
-      .withLocation(Identifier.of("anubis", "pipeline/sky_theme_composite"))
-      .withVertexShader("core/screenquad")
-      .withFragmentShader(Identifier.of("anubis", "core/sky_theme_composite"))
-      .withSampler("InSampler")
-      .withBlend(BlendFunction.TRANSLUCENT)
+   private static final RenderPipeline PIPELINE = RenderPipeline.builder(RenderPipelines.TRANSFORMS_AND_PROJECTION_SNIPPET)
+      .withLocation(Identifier.of("anubis", "pipeline/sky_theme"))
+      .withVertexShader(Identifier.of("anubis", "core/sky_theme"))
+      .withFragmentShader(Identifier.of("anubis", "core/sky_theme"))
+      .withUniform("AnubisSky", UniformType.UNIFORM_BUFFER)
       .withDepthWrite(false)
-      .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
       .withCull(false)
-      .withVertexFormat(VertexFormats.EMPTY, DrawMode.TRIANGLES)
+      .withVertexFormat(VertexFormats.POSITION, DrawMode.QUADS)
+      .withBlend(BlendFunction.TRANSLUCENT)
       .build();
    private static final int UNIFORM_SIZE = 112;
    private static final float CUBE = 10.0F;
@@ -67,28 +59,9 @@ final class AtmosphereShaderSky {
    private GpuBuffer cube;
    private GpuBuffer uniforms;
    private ByteBuffer uniformData;
-   private SimpleFramebuffer mobileTarget;
-   private boolean mobileTargetFailed;
    private boolean invalidLogged;
    private float time;
    private long lastNanos;
-
-   private static RenderPipeline skyPipeline(int mobileMode) {
-      boolean offscreen = mobileMode >= 0;
-      Builder builder = RenderPipeline.builder(new Snippet[]{RenderPipelines.TRANSFORMS_AND_PROJECTION_SNIPPET})
-         .withLocation(Identifier.of("anubis", offscreen ? "pipeline/sky_theme_mobile_" + mobileMode : "pipeline/sky_theme"))
-         .withVertexShader(Identifier.of("anubis", "core/sky_theme"))
-         .withFragmentShader(Identifier.of("anubis", "core/sky_theme"))
-         .withUniform("AnubisSky", UniformType.UNIFORM_BUFFER)
-         .withDepthWrite(false)
-         .withCull(false)
-         .withVertexFormat(VertexFormats.POSITION, DrawMode.QUADS);
-      if (offscreen) {
-         builder.withShaderDefine("ANUBIS_SKY_MODE", mobileMode);
-      }
-
-      return (offscreen ? builder.withoutBlend().withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST) : builder.withBlend(BlendFunction.TRANSLUCENT)).build();
-   }
 
    boolean render(
       String theme,
@@ -111,17 +84,16 @@ final class AtmosphereShaderSky {
       this.time = (this.time + dt * speed) % 4096.0F;
       if (mode >= 0 && !(visibility <= 0.002F)) {
          GpuDevice device = RenderSystem.getDevice();
-         boolean mobile = AtmosphereQuality.mobile();
-         if (mobile && this.mobileTargetFailed) {
-            return false;
-         }
+         if (!device.precompilePipeline(PIPELINE).isValid()) {
+            if (!this.invalidLogged) {
+               this.invalidLogged = true;
+               LOGGER.warn("[Anubis] Atmosphere sky shader {} did not compile; using the gradient sky", PIPELINE.getFragmentShader());
+            }
 
-         RenderPipeline pipeline = mobile ? MOBILE_PIPELINES[mode] : PIPELINE;
-         if (device.precompilePipeline(pipeline).isValid() && (!mobile || device.precompilePipeline(COMPOSITE).isValid())) {
+            return false;
+         } else {
             Framebuffer target = MinecraftClient.getInstance().getFramebuffer();
             if (target.textureWidth > 0 && target.textureHeight > 0) {
-               int width = mobile ? AtmosphereQuality.skyWidth(target.textureWidth, target.textureHeight) : target.textureWidth;
-               int height = mobile ? AtmosphereQuality.skyHeight(target.textureWidth, target.textureHeight) : target.textureHeight;
                if (this.cube == null) {
                   this.cube = buildCube(device);
                }
@@ -132,7 +104,7 @@ final class AtmosphereShaderSky {
                }
 
                this.putVec(0, mode, visibility, this.time, brightness);
-               this.putVec(16, stars, effect, band, (float)width / target.textureWidth);
+               this.putVec(16, stars, effect, band, 1.0F);
                this.putColor(32, low);
                this.putColor(48, high);
                this.putColor(64, bandColor);
@@ -143,98 +115,17 @@ final class AtmosphereShaderSky {
                GpuBufferSlice transforms = RenderSystem.getDynamicUniforms()
                   .write(RenderSystem.getModelViewStack(), new Vector4f(1.0F, 1.0F, 1.0F, 1.0F), new Vector3f(), new Matrix4f());
                ShapeIndexBuffer indices = RenderSystem.getSequentialBuffer(DrawMode.QUADS);
-               if (!mobile) {
-                  RenderPass pass = encoder.createRenderPass(
+
+               try (RenderPass pass = encoder.createRenderPass(
                      () -> "Anubis sky theme", target.getColorAttachmentView(), OptionalInt.empty(), target.getDepthAttachmentView(), OptionalDouble.empty()
-                  );
-
-                  try {
-                     this.drawSky(pass, pipeline, transforms, indices);
-                  } catch (Throwable var32) {
-                     if (pass != null) {
-                        try {
-                           pass.close();
-                        } catch (Throwable var29) {
-                           var32.addSuppressed(var29);
-                        }
-                     }
-
-                     throw var32;
-                  }
-
-                  if (pass != null) {
-                     pass.close();
-                  }
-
-                  return true;
-               } else {
-                  try {
-                     if (this.mobileTarget == null) {
-                        this.mobileTarget = new SimpleFramebuffer("Anubis mobile sky", width, height, false);
-                     } else if (this.mobileTarget.textureWidth != width || this.mobileTarget.textureHeight != height) {
-                        this.mobileTarget.resize(width, height);
-                     }
-
-                     RenderPass pass = encoder.createRenderPass(() -> "Anubis mobile sky", this.mobileTarget.getColorAttachmentView(), OptionalInt.of(0));
-
-                     try {
-                        this.drawSky(pass, pipeline, transforms, indices);
-                     } catch (Throwable var34) {
-                        if (pass != null) {
-                           try {
-                              pass.close();
-                           } catch (Throwable var31) {
-                              var34.addSuppressed(var31);
-                           }
-                        }
-
-                        throw var34;
-                     }
-
-                     if (pass != null) {
-                        pass.close();
-                     }
-
-                     pass = encoder.createRenderPass(() -> "Anubis mobile sky composite", target.getColorAttachmentView(), OptionalInt.empty());
-
-                     try {
-                        pass.setPipeline(COMPOSITE);
-                        pass.bindTexture("InSampler", this.mobileTarget.getColorAttachmentView(), RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
-                        pass.draw(0, 3);
-                     } catch (Throwable var33) {
-                        if (pass != null) {
-                           try {
-                              pass.close();
-                           } catch (Throwable var30) {
-                              var33.addSuppressed(var30);
-                           }
-                        }
-
-                        throw var33;
-                     }
-
-                     if (pass != null) {
-                        pass.close();
-                     }
-
-                     return true;
-                  } catch (RuntimeException failure) {
-                     this.mobileTargetFailed = true;
-                     this.releaseMobileTarget();
-                     LOGGER.warn("[Anubis] Mobile sky target unavailable; using the gradient sky", failure);
-                     return false;
-                  }
+                  )) {
+                  this.drawSky(pass, PIPELINE, transforms, indices);
                }
+
+               return true;
             } else {
                return false;
             }
-         } else {
-            if (!this.invalidLogged) {
-               this.invalidLogged = true;
-               LOGGER.warn("[Anubis] Atmosphere sky shader {} did not compile; using the gradient sky", pipeline.getFragmentShader());
-            }
-
-            return false;
          }
       } else {
          return false;
@@ -252,7 +143,6 @@ final class AtmosphereShaderSky {
    }
 
    void close() {
-      this.releaseMobileTarget();
       if (this.cube != null) {
          this.cube.close();
       }
@@ -265,15 +155,7 @@ final class AtmosphereShaderSky {
       this.uniforms = null;
       this.uniformData = null;
       this.lastNanos = 0L;
-      this.mobileTargetFailed = false;
       this.invalidLogged = false;
-   }
-
-   private void releaseMobileTarget() {
-      if (this.mobileTarget != null) {
-         this.mobileTarget.delete();
-         this.mobileTarget = null;
-      }
    }
 
    private void putVec(int offset, float x, float y, float z, float w) {
@@ -288,10 +170,7 @@ final class AtmosphereShaderSky {
    }
 
    private static GpuBuffer buildCube(GpuDevice device) {
-      BufferAllocator bytes = new BufferAllocator(24 * VertexFormats.POSITION.getVertexSize());
-
-      GpuBuffer var5;
-      try {
+      try (BufferAllocator bytes = new BufferAllocator(24 * VertexFormats.POSITION.getVertexSize())) {
          BufferBuilder builder = new BufferBuilder(bytes, DrawMode.QUADS, VertexFormats.POSITION);
          float s = 10.0F;
          face(builder, s, -s, -s, s, s, -s, s, s, s, s, -s, s);
@@ -300,37 +179,11 @@ final class AtmosphereShaderSky {
          face(builder, -s, -s, s, -s, -s, -s, s, -s, -s, s, -s, s);
          face(builder, s, -s, s, s, s, s, -s, s, s, -s, -s, s);
          face(builder, -s, -s, -s, -s, s, -s, s, s, -s, s, -s, -s);
-         BuiltBuffer mesh = builder.end();
 
-         try {
-            var5 = device.createBuffer(() -> "Anubis sky theme cube", 32, mesh.getBuffer());
-         } catch (Throwable var9) {
-            if (mesh != null) {
-               try {
-                  mesh.close();
-               } catch (Throwable var8) {
-                  var9.addSuppressed(var8);
-               }
-            }
-
-            throw var9;
+         try (BuiltBuffer mesh = builder.end()) {
+            return device.createBuffer(() -> "Anubis sky theme cube", 32, mesh.getBuffer());
          }
-
-         if (mesh != null) {
-            mesh.close();
-         }
-      } catch (Throwable var10) {
-         try {
-            bytes.close();
-         } catch (Throwable var7) {
-            var10.addSuppressed(var7);
-         }
-
-         throw var10;
       }
-
-      bytes.close();
-      return var5;
    }
 
    private static void face(

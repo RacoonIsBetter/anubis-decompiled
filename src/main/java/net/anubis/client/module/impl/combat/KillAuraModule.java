@@ -18,18 +18,18 @@ import net.anubis.client.util.pvp.ServerRotation;
 import net.anubis.client.util.pvp.TargetingUtils;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.component.type.PiercingWeaponComponent;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.AttackRangeComponent;
+import net.minecraft.component.type.PiercingWeaponComponent;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.component.DataComponentTypes;
 
 @Environment(EnvType.CLIENT)
 public final class KillAuraModule extends ClientModule {
@@ -108,7 +108,7 @@ public final class KillAuraModule extends ClientModule {
                Box hitBox = raw.contract(side, 0.01, side);
                Rotation aim = RotationUtils.fromTo(eye, point);
                Rotation next = !riding && !hitBox.contains(eye) && ServerRotation.canRotate(player) && !ServerRotation.pending()
-                  ? ServerRotation.next(player, aim)
+                  ? ServerRotation.nextStep(player, aim)
                   : null;
                Vec3d nextAt = hits(player, eye, hitBox, reach, next);
                if (!ready) {

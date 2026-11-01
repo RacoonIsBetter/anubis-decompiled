@@ -1,15 +1,16 @@
 package net.anubis.client.util.pvp;
 
+import java.util.concurrent.ThreadLocalRandom;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.util.PlayerInput;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.PlayerInput;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.util.math.Vec3d;
 
 @Environment(EnvType.CLIENT)
 public final class ServerRotation {
@@ -17,18 +18,33 @@ public final class ServerRotation {
    private static Rotation committed;
    private static Rotation server;
    private static boolean silent;
+   private static boolean steered;
    private static ClientPlayerEntity owner;
    private static float ownYaw;
    private static float ownPitch;
    private static boolean swapped;
    private static Rotation walked;
+   private static final float MAX_STEP = 25.0F;
+   private static final int EASE_TICKS = 10;
+   private static final float EASE_SPEED = 5.0F;
+   private static final float EASE_DONE = 0.5F;
+   private static final float EASE_GIVE_UP = 150.0F;
+   private static float requestedSpeed;
+   private static Rotation stepped;
+   private static boolean requestedLastTick;
+   private static int easeLeft;
 
    private ServerRotation() {
    }
 
    public static void request(Rotation rotation) {
+      request(rotation, 0.0F);
+   }
+
+   public static void request(Rotation rotation, float speed) {
       if (requested == null && committed == null) {
          requested = rotation;
+         requestedSpeed = speed;
       }
    }
 
@@ -36,8 +52,16 @@ public final class ServerRotation {
       return requested != null || committed != null;
    }
 
+   public static Rotation nextStep(ClientPlayerEntity player, Rotation wanted) {
+      return step(player, wanted, 0.0F);
+   }
+
    public static Rotation sent() {
       return server;
+   }
+
+   public static boolean desynced() {
+      return silent;
    }
 
    public static boolean canRotate(ClientPlayerEntity player) {
@@ -62,9 +86,21 @@ public final class ServerRotation {
          server = null;
       }
 
+      requestedLastTick = requested != null;
       requested = null;
       committed = null;
-      if (player != null && server != null && !(Math.abs(player.getYaw() - server.yaw()) <= 180.0F)) {
+      stepped = null;
+      if (requestedLastTick) {
+         easeLeft = 10;
+      } else if (easeLeft > 0) {
+         easeLeft--;
+      }
+
+      if (easeLeft > 0 && (player == null || server == null || closeToCamera(player))) {
+         easeLeft = 0;
+      }
+
+      if (player != null && server != null && steered && !(Math.abs(player.getYaw() - server.yaw()) <= 180.0F)) {
          float shift = server.yaw() + MathHelper.wrapDegrees(player.getYaw() - server.yaw()) - player.getYaw();
          player.setYaw(player.getYaw() + shift);
          player.lastYaw += shift;
@@ -79,15 +115,18 @@ public final class ServerRotation {
 
    public static void noteSent(Packet<?> packet) {
       if (packet instanceof PlayerMoveC2SPacket move && move.changesLook() && MinecraftClient.getInstance().isOnThread()) {
+         ClientPlayerEntity player = MinecraftClient.getInstance().player;
          server = new Rotation(move.getYaw(0.0F), move.getPitch(0.0F));
          silent = swapped;
-         owner = MinecraftClient.getInstance().player;
+         steered = swapped || player != null && (server.yaw() != player.getYaw() || server.pitch() != player.getPitch());
+         owner = player;
       }
    }
 
    public static Rotation commit(ClientPlayerEntity player) {
       if (committed == null) {
-         committed = requested != null && canRotate(player) ? next(player, requested) : new Rotation(player.getYaw(), player.getPitch());
+         Rotation target = canRotate(player) ? target(player) : null;
+         committed = target != null ? target : new Rotation(player.getYaw(), player.getPitch());
       }
 
       return committed;
@@ -99,7 +138,7 @@ public final class ServerRotation {
 
    public static void applyForMovement(ClientPlayerEntity player) {
       if (!swapped && canRotate(player)) {
-         Rotation target = committed != null ? committed : (requested != null ? next(player, requested) : null);
+         Rotation target = target(player);
          if (target != null && (target.yaw() != player.getYaw() || target.pitch() != player.getPitch())) {
             ownYaw = player.getYaw();
             ownPitch = player.getPitch();
@@ -147,19 +186,28 @@ public final class ServerRotation {
    }
 
    public static boolean misses(ClientPlayerEntity player, Box box, double range) {
-      if (server != null && pending() && canRotate(player)) {
-         Vec3d eye = player.getEyePos();
-         if (box.contains(eye)) {
-            return false;
-         }
-
-         Rotation look = committed != null ? committed : next(player, requested);
-         return !hits(eye, box, range, look.yaw(), look.pitch())
-            && !hits(eye, box, range, server.yaw(), look.pitch())
-            && !hits(eye, box, range, server.yaw(), server.pitch());
-      } else {
+      if (server == null || !canRotate(player)) {
          return false;
       }
+
+      if (!pending()) {
+         endEase();
+         return false;
+      }
+
+      Vec3d eye = player.getEyePos();
+      if (box.contains(eye)) {
+         return false;
+      }
+
+      Rotation look = target(player);
+      if (look == null) {
+         look = new Rotation(player.getYaw(), player.getPitch());
+      }
+
+      return !hits(eye, box, range, look.yaw(), look.pitch())
+         && !hits(eye, box, range, server.yaw(), look.pitch())
+         && !hits(eye, box, range, server.yaw(), server.pitch());
    }
 
    public static boolean missesBlock(ClientPlayerEntity player, Box box, double range) {
@@ -167,13 +215,17 @@ public final class ServerRotation {
          return false;
       }
 
+      if (!pending()) {
+         endEase();
+      }
+
       if (!silent) {
          if (!pending() || !canRotate(player)) {
             return false;
          }
 
-         Rotation look = committed != null ? committed : next(player, requested);
-         if (look.yaw() == player.getYaw() && look.pitch() == player.getPitch()) {
+         Rotation look = target(player);
+         if (look == null || look.yaw() == player.getYaw() && look.pitch() == player.getPitch()) {
             return false;
          }
       }
@@ -192,6 +244,70 @@ public final class ServerRotation {
       if (swapped) {
          restore(player);
       }
+   }
+
+   private static Rotation target(ClientPlayerEntity player) {
+      if (committed != null) {
+         return committed;
+      }
+
+      if (stepped != null) {
+         return stepped;
+      }
+
+      if (requested != null) {
+         stepped = step(player, requested, requestedSpeed);
+      } else if (easeLeft > 0 && server != null) {
+         stepped = step(player, new Rotation(player.getYaw(), player.getPitch()), 5.0F);
+      }
+
+      return stepped;
+   }
+
+   private static Rotation step(ClientPlayerEntity player, Rotation wanted, float speed) {
+      Rotation base = server != null ? server : new Rotation(player.getYaw(), player.getPitch());
+      double unit = RotationUtils.mouseScale(MinecraftClient.getInstance(), player) * 0.15;
+      double yaw = MathHelper.wrapDegrees(wanted.yaw() - base.yaw());
+      double pitch = wanted.pitch() - base.pitch();
+      double distance = Math.hypot(yaw, pitch);
+      if (distance < 1.0E-4) {
+         return next(player, wanted);
+      }
+
+      double scale = 1.0;
+      if (speed > 0.0F) {
+         double stride = Math.min(distance, 0.313 * distance + 1.56 * speed);
+         if (stride < distance) {
+            stride *= 0.85 + 0.15 * ThreadLocalRandom.current().nextDouble();
+         }
+
+         scale = stride / distance;
+      }
+
+      double bigger = Math.max(Math.abs(yaw), Math.abs(pitch)) * scale;
+      if (bigger > 25.0) {
+         scale *= 25.0 / bigger;
+      }
+
+      long cap = Math.max(1L, (long)Math.floor(25.0 / unit));
+      long yawCounts = MathHelper.clamp(Math.round(yaw * scale / unit), -cap, cap);
+      long pitchCounts = MathHelper.clamp(Math.round(pitch * scale / unit), -cap, cap);
+      return new Rotation(base.yaw() + (float)(yawCounts * unit), MathHelper.clamp(base.pitch() + (float)(pitchCounts * unit), -90.0F, 90.0F));
+   }
+
+   private static void endEase() {
+      if (easeLeft != 0 && committed == null) {
+         easeLeft = 0;
+         stepped = null;
+      }
+   }
+
+   private static boolean closeToCamera(ClientPlayerEntity player) {
+      double unit = RotationUtils.mouseScale(MinecraftClient.getInstance(), player) * 0.15;
+      double yaw = Math.abs(MathHelper.wrapDegrees(player.getYaw() - server.yaw()));
+      double pitch = Math.abs(player.getPitch() - server.pitch());
+      double off = Math.max(yaw, pitch);
+      return off <= Math.max(0.5, 2.0 * unit) || off > 150.0;
    }
 
    private static int impulse(boolean positive, boolean negative) {

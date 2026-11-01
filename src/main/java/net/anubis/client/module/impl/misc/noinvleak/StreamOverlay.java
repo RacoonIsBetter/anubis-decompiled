@@ -3,6 +3,7 @@ package net.anubis.client.module.impl.misc.noinvleak;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuFence;
 import com.mojang.blaze3d.buffers.GpuBuffer.MappedView;
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -15,18 +16,21 @@ import imgui.ImGui;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import net.anubis.client.gui.BorderlessFullscreen;
 import net.anubis.client.gui.ItemIcons;
 import net.anubis.client.gui.ItemLook;
 import net.anubis.client.module.impl.misc.NoInvLeakModule;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.util.Window;
-import net.minecraft.util.Atlases;
-import net.minecraft.item.ItemStack;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.util.Window;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.Atlases;
 import org.lwjgl.opengl.GL11;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -109,17 +113,37 @@ public final class StreamOverlay {
    private static GpuTextureView scratchDepthView;
    private static GpuBuffer readback;
    private static int iconPx;
-   private static boolean failed;
+   private static volatile boolean unsupported;
+   private static volatile long retryAt;
+   private static int transientFailures;
+   private static boolean toldUnsupported;
+   private static boolean toldPaused;
+   private static boolean toldFullscreen;
+   private static boolean diagnosed;
+   private static final long[] BACKOFF = new long[]{2000000000L, 10000000000L, 60000000000L};
+   private static final long REPEAT_LOG_INTERVAL = 60000000000L;
+   private static final Map<String, long[]> reported = new HashMap<>();
 
    private StreamOverlay() {
    }
 
    public static boolean usable() {
-      return Platform.isWindows() && !failed;
+      if (Platform.isWindows() && !unsupported) {
+         long at = retryAt;
+         return at == 0L || System.nanoTime() - at >= 0L;
+      } else {
+         return false;
+      }
    }
 
    public static void retry() {
-      failed = false;
+      unsupported = false;
+      retryAt = 0L;
+      transientFailures = 0;
+   }
+
+   public static boolean recordsHotbar() {
+      return hotbarVisible();
    }
 
    public static void hotbar(int slot, int x, int y, ItemStack item) {
@@ -177,18 +201,23 @@ public final class StreamOverlay {
       long bits = fakeMask;
       int scale = fakeScale;
       if (bits != 0L && scale > 0) {
-         fakeList = ImGui.getBackgroundDrawList();
+         try {
+            fakeList = ImGui.getBackgroundDrawList();
 
-         for (int slot = 0; slot < 41; slot++) {
-            if ((bits >>> slot & 1L) != 0L) {
-               ItemStack fake = NoInvLeakModule.fakeFor(slot);
-               if (!fake.isEmpty()) {
-                  int x = guiX[slot] * scale;
-                  int y = guiY[slot] * scale;
-                  ItemIcons.draw(fakeList, fake, x, y, 16.0F * scale, 1.0F);
-                  DigitFont.decorations(FAKE_SINK, fake, x, y, scale);
+            for (int slot = 0; slot < 41; slot++) {
+               if ((bits >>> slot & 1L) != 0L) {
+                  ItemStack fake = NoInvLeakModule.fakeFor(slot);
+                  if (!fake.isEmpty()) {
+                     int x = guiX[slot] * scale;
+                     int y = guiY[slot] * scale;
+                     ItemIcons.draw(fakeList, fake, x, y, 16.0F * scale, 1.0F);
+                     DigitFont.decorations(FAKE_SINK, fake, x, y, scale);
+                  }
                }
             }
+         } catch (RuntimeException | LinkageError e) {
+            fakeMask = 0L;
+            fail(e, "drawing the stream's fake items");
          }
       }
    }
@@ -227,10 +256,8 @@ public final class StreamOverlay {
                TextPanels.update(win, scale, windowX, windowY);
             }
          } catch (RuntimeException | LinkageError e) {
-            failed = true;
             fakeMask = 0L;
-            LOGGER.warn("[Anubis] No Inv Leak: stream-only overlay unavailable ({}); items stay hidden", e.toString());
-            release();
+            fail(e, "drawing the overlay");
          }
 
          TextPanels.frameDone();
@@ -244,7 +271,93 @@ public final class StreamOverlay {
       }
    }
 
+   private static void fail(Throwable e, String phase) {
+      boolean permanent = e instanceof OverlayWindow.Unsupported || e instanceof LinkageError;
+      String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+      long wait = 0L;
+      if (permanent) {
+         unsupported = true;
+      } else {
+         wait = BACKOFF[Math.min(transientFailures++, BACKOFF.length - 1)];
+         retryAt = System.nanoTime() + wait;
+      }
+
+      String key = phase + "|" + e.getClass().getName() + "|" + reason;
+      long now = System.nanoTime();
+      long[] seen = reported.get(key);
+      String outcome = permanent ? "turned off for this session" : "retrying in " + wait / 1000000000L + " s";
+      if (seen == null) {
+         reported.put(key, new long[]{now, 0L});
+         LOGGER.warn(
+            "[Anubis] No Inv Leak: Stream Only failed while {} ({}); {}. Windows build {}. Your items are shown as hidden to you as well until it works again.",
+            new Object[]{phase, reason, outcome, OverlayWindow.windowsBuild(), e}
+         );
+      } else if (now - seen[0] >= 60000000000L) {
+         LOGGER.warn(
+            "[Anubis] No Inv Leak: Stream Only failed again while {} ({}), {} more time(s) since the last report; {}",
+            new Object[]{phase, reason, seen[1] + 1L, outcome}
+         );
+         seen[0] = now;
+         seen[1] = 0L;
+      } else {
+         seen[1]++;
+      }
+
+      if (permanent && !toldUnsupported) {
+         toldUnsupported = true;
+         NoInvLeakModule.streamNotice("Stream Only unavailable", ": " + reason + ". Items stay hidden for you too.");
+      } else if (!permanent && !toldPaused) {
+         toldPaused = true;
+         NoInvLeakModule.streamNotice("Stream Only paused", ": " + reason + ". Retrying automatically.");
+      }
+
+      try {
+         release();
+      } catch (RuntimeException | LinkageError cleanup) {
+         LOGGER.debug("[Anubis] No Inv Leak: overlay cleanup failed", cleanup);
+      }
+   }
+
+   private static void diagnose(MinecraftClient mc, Window win) {
+      if (!diagnosed) {
+         diagnosed = true;
+         transientFailures = 0;
+         boolean fullscreen = win.isFullscreen();
+         boolean borderless = fullscreen && ((BorderlessFullscreen.Switchable)(Object)win).anubis$isBorderless();
+         String mode = !fullscreen ? "windowed" : (borderless ? "borderless fullscreen" : "exclusive fullscreen");
+
+         String renderer;
+         try {
+            renderer = GL11.glGetString(7936) + " / " + GL11.glGetString(7937);
+         } catch (RuntimeException | LinkageError unknown) {
+            renderer = "unknown";
+         }
+
+         LOGGER.info(
+            "[Anubis] No Inv Leak: Stream Only overlay active (Windows build {}, {}, window {}x{} at {},{}, framebuffer {}x{}, gui scale {}, {}, overlay {})",
+            new Object[]{
+               OverlayWindow.windowsBuild(),
+               mode,
+               win.getWidth(),
+               win.getHeight(),
+               win.getX(),
+               win.getY(),
+               mc.getFramebuffer().textureWidth,
+               mc.getFramebuffer().textureHeight,
+               win.getScaleFactor(),
+               renderer,
+               slotWindow != null ? slotWindow.describe() : "pending"
+            }
+         );
+         if (fullscreen && !borderless && !toldFullscreen) {
+            toldFullscreen = true;
+            NoInvLeakModule.streamNotice("Stream Only", ": exclusive fullscreen can hide the overlay from you. Turn on Borderless Fullscreen.");
+         }
+      }
+   }
+
    public static void stop() {
+      diagnosed = false;
       if (RenderSystem.isOnRenderThread()) {
          release();
       } else {
@@ -403,8 +516,21 @@ public final class StreamOverlay {
                   if (icon != null) {
                      slotIcon[i] = icon;
                   } else {
-                     int cell = pending++;
-                     ItemIcons.render(look, scratch, scratchView, scratchDepth, scratchDepthView, cellX(cell, px), cellY(cell, px), px);
+                     int cell = pending;
+
+                     try {
+                        ItemIcons.render(look, scratch, scratchView, scratchDepth, scratchDepthView, cellX(cell, px), cellY(cell, px), px);
+                     } catch (RuntimeException e) {
+                        slotIcon[i] = BLANK;
+                        look.clear();
+                        String key = "icon|" + item.getItem();
+                        if (reported.putIfAbsent(key, new long[]{System.nanoTime(), 0L}) == null) {
+                           LOGGER.warn("[Anubis] No Inv Leak: Stream Only could not draw the icon for {}; it stays blank", item.getItem(), e);
+                        }
+                        continue;
+                     }
+
+                     pending++;
                      pendingSlot[cell] = i;
                      pendingKey[cell] = Arrays.asList(look.identity.toArray());
                   }
@@ -479,40 +605,28 @@ public final class StreamOverlay {
          }
 
          CommandEncoder encoder = device.createCommandEncoder();
-         if (pending > 0) {
-            encoder.copyTextureToBuffer(scratch, readback, 0L, NOTHING, 0);
-         }
-
-         if (framed) {
-            copyRegion(encoder, readback, scratchBytes, syncRegion);
-         }
-
-         GpuFence copied = encoder.createFence();
+         packDefaults();
 
          try {
+            if (pending > 0) {
+               encoder.copyTextureToBuffer(scratch, readback, 0L, NOTHING, 0);
+            }
+
+            if (framed) {
+               copyRegion(encoder, readback, scratchBytes, syncRegion);
+            }
+         } finally {
+            packReset();
+         }
+
+         try (GpuFence view = encoder.createFence()) {
             GL11.glFlush();
-            if (!copied.awaitCompletion(1000000000L)) {
+            if (!view.awaitCompletion(1000000000L)) {
                throw new IllegalStateException("overlay read-back timed out");
             }
-         } catch (Throwable var24) {
-            if (copied != null) {
-               try {
-                  copied.close();
-               } catch (Throwable var23) {
-                  var24.addSuppressed(var23);
-               }
-            }
-
-            throw var24;
          }
 
-         if (copied != null) {
-            copied.close();
-         }
-
-         MappedView view = encoder.mapBuffer(readback.slice(0L, used), true, false);
-
-         try {
+         try (MappedView view = encoder.mapBuffer(readback.slice(0L, used), true, false)) {
             ByteBuffer data = view.data();
 
             for (int c = 0; c < pending; c++) {
@@ -527,20 +641,6 @@ public final class StreamOverlay {
                unpackBackground(data, (int)scratchBytes, syncRegion, framed, slotBits, scale);
                backgroundAt = System.nanoTime();
             }
-         } catch (Throwable var25) {
-            if (view != null) {
-               try {
-                  view.close();
-               } catch (Throwable var22) {
-                  var25.addSuppressed(var22);
-               }
-            }
-
-            throw var25;
-         }
-
-         if (view != null) {
-            view.close();
          }
       }
    }
@@ -559,7 +659,14 @@ public final class StreamOverlay {
          }
 
          CommandEncoder encoder = device.createCommandEncoder();
-         copyRegion(encoder, asyncBuffer, 0L, asyncRegion);
+         packDefaults();
+
+         try {
+            copyRegion(encoder, asyncBuffer, 0L, asyncRegion);
+         } finally {
+            packReset();
+         }
+
          asyncFence = encoder.createFence();
          GL11.glFlush();
          asyncMask = slotBits;
@@ -586,24 +693,9 @@ public final class StreamOverlay {
          if (usable) {
             long bytes = (long)asyncRegion[2] * asyncRegion[3] * 4L;
             CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-            MappedView view = encoder.mapBuffer(asyncBuffer.slice(0L, bytes), true, false);
 
-            try {
+            try (MappedView view = encoder.mapBuffer(asyncBuffer.slice(0L, bytes), true, false)) {
                changed = unpackBackground(view.data(), 0, asyncRegion, true, slotBits, scale);
-            } catch (Throwable var12) {
-               if (view != null) {
-                  try {
-                     view.close();
-                  } catch (Throwable var11) {
-                     var12.addSuppressed(var11);
-                  }
-               }
-
-               throw var12;
-            }
-
-            if (view != null) {
-               view.close();
             }
          }
 
@@ -626,8 +718,18 @@ public final class StreamOverlay {
       return (long)frame.getWidth(0) * frame.getHeight(0) * 4L;
    }
 
+   private static void packDefaults() {
+      GlStateManager._pixelStore(3333, 4);
+      GlStateManager._pixelStore(3331, 0);
+      GlStateManager._pixelStore(3332, 0);
+   }
+
+   private static void packReset() {
+      GlStateManager._pixelStore(3330, 0);
+   }
+
    private static boolean region(long slotBits, int scale, int[] out) {
-      Window win = MinecraftClient.getInstance().getWindow();
+      GpuTexture target = MinecraftClient.getInstance().getFramebuffer().getColorAttachment();
       int px = 16 * scale;
       int x0 = Integer.MAX_VALUE;
       int y0 = Integer.MAX_VALUE;
@@ -645,8 +747,8 @@ public final class StreamOverlay {
 
       x0 = Math.max(x0, 0);
       y0 = Math.max(y0, 0);
-      x1 = Math.min(x1, win.getFramebufferWidth());
-      y1 = Math.min(y1, win.getFramebufferHeight());
+      x1 = Math.min(x1, target.getWidth(0));
+      y1 = Math.min(y1, target.getHeight(0));
       if (x1 > x0 && y1 > y0) {
          out[0] = x0;
          out[1] = y0;
@@ -659,10 +761,8 @@ public final class StreamOverlay {
    }
 
    private static void copyRegion(CommandEncoder encoder, GpuBuffer target, long offset, int[] region) {
-      MinecraftClient mc = MinecraftClient.getInstance();
-      encoder.copyTextureToBuffer(
-         mc.getFramebuffer().getColorAttachment(), target, offset, NOTHING, 0, region[0], mc.getWindow().getFramebufferHeight() - region[1] - region[3], region[2], region[3]
-      );
+      GpuTexture color = MinecraftClient.getInstance().getFramebuffer().getColorAttachment();
+      encoder.copyTextureToBuffer(color, target, offset, NOTHING, 0, region[0], color.getHeight(0) - region[1] - region[3], region[2], region[3]);
    }
 
    private static int[] unpackIcon(ByteBuffer data, int cellX, int cellY, int side, int px) {
@@ -673,7 +773,8 @@ public final class StreamOverlay {
 
          for (int x = 0; x < px; x++) {
             int at = row + x * 4;
-            out[y * px + x] = (data.get(at + 3) & 255) << 24 | (data.get(at) & 255) << 16 | (data.get(at + 1) & 255) << 8 | data.get(at + 2) & 255;
+            int a = data.get(at + 3) & 255;
+            out[y * px + x] = a << 24 | Math.min(a, data.get(at) & 255) << 16 | Math.min(a, data.get(at + 1) & 255) << 8 | Math.min(a, data.get(at + 2) & 255);
          }
       }
 
@@ -753,7 +854,10 @@ public final class StreamOverlay {
          maxY = Math.max(maxY, selectionY + frame.height());
       }
 
-      if (minX <= maxX) {
+      if (minX > maxX) {
+         slotWindow.hide();
+         shownMask = 0L;
+      } else {
          int bx = minX * scale;
          int by = minY * scale;
          int bw = (maxX - minX) * scale;
@@ -794,6 +898,7 @@ public final class StreamOverlay {
          }
 
          slotWindow.present(windowX + bx, windowY + by, bw, bh);
+         diagnose(MinecraftClient.getInstance(), MinecraftClient.getInstance().getWindow());
 
          for (int i = 0; i < 41; i++) {
             if ((slotBits >>> i & 1L) != 0L) {

@@ -170,10 +170,6 @@ public final class Motion {
       return this.bend;
    }
 
-   public boolean springy() {
-      return this.stiffness > 0.0F;
-   }
-
    public void target(Motion.Input in, Bone parent, float[] out) {
       float speed = Math.min(1.0F, Math.max(0.0F, in.walkSpeed));
       float idle = (float)Math.sin(in.time * this.idleRate * (float) (Math.PI * 2) + this.idlePhase);

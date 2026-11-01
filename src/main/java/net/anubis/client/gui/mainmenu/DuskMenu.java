@@ -21,6 +21,7 @@ public final class DuskMenu {
    private static final List<MenuAction> ICONS = List.of(
       MenuAction.ACCOUNTS, MenuAction.LANGUAGE, MenuAction.ACCESSIBILITY, MenuAction.ANUBIS, MenuAction.MODS, MenuAction.CREDITS
    );
+   private static final List<MenuAction> ICONS_WITHOUT_ACCOUNTS = ICONS.subList(1, ICONS.size());
    private static final float ICON_R = 9.0F;
    private static final float ICON_STEP = 34.0F;
    private static final float ICON_MARGIN = 26.0F;
@@ -64,10 +65,11 @@ public final class DuskMenu {
 
       float a = c.intro(0.7F);
       float iconY = sh - 26.0F * s;
-      float iconX = sw - 26.0F * s - (ICONS.size() - 1) * 34.0F * s;
+      List<MenuAction> icons = c.accountsAvailable() ? ICONS : ICONS_WITHOUT_ACCOUNTS;
+      float iconX = sw - 26.0F * s - (icons.size() - 1) * 34.0F * s;
 
-      for (int i = 0; i < ICONS.size(); i++) {
-         icon(c, ICONS.get(i), iconX + i * 34.0F * s, iconY, a);
+      for (int i = 0; i < icons.size(); i++) {
+         icon(c, icons.get(i), iconX + i * 34.0F * s, iconY, a);
       }
    }
 

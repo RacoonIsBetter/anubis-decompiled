@@ -8,59 +8,59 @@ import it.unimi.dsi.fastutil.objects.Object2IntMap.Entry;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import net.anubis.client.input.AnubisKeyPolling;
 import net.anubis.client.input.ModuleKeybinds;
 import net.anubis.client.module.impl.combat.melee.MeleeAttacks;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockEntityProvider;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.ShapeContext;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
+import net.minecraft.client.util.InputUtil.Key;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.EnchantmentEffectComponentTypes;
 import net.minecraft.component.type.EquippableComponent;
-import net.minecraft.util.Hand;
-import net.minecraft.entity.effect.StatusEffect;
-import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.enchantment.Enchantment;
+import net.minecraft.enchantment.effect.EnchantmentEffectEntry;
+import net.minecraft.enchantment.effect.EnchantmentValueEffect;
+import net.minecraft.enchantment.effect.value.AddEnchantmentEffect;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.attribute.EntityAttribute;
-import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
+import net.minecraft.entity.attribute.EntityAttributeModifier;
+import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.decoration.EndCrystalEntity;
+import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.world.World;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.Block;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.block.BlockEntityProvider;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.block.ShapeContext;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.enchantment.effect.EnchantmentEffectEntry;
-import net.minecraft.component.EnchantmentEffectComponentTypes;
-import net.minecraft.enchantment.effect.value.AddEnchantmentEffect;
-import net.minecraft.enchantment.effect.EnchantmentValueEffect;
+import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult.Success;
 import net.minecraft.util.ActionResult.SwingSource;
-import net.minecraft.client.util.InputUtil.Key;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 import org.lwjgl.glfw.GLFW;
 
 @Environment(EnvType.CLIENT)
@@ -72,14 +72,7 @@ public final class Crystals {
    private static final float RTT_SMOOTHING = 0.25F;
    private static final double RESERVE_RANGE = 12.0;
    private static final Set<Block> USABLE_BLOCKS = Set.of(
-      Blocks.RESPAWN_ANCHOR,
-      Blocks.NOTE_BLOCK,
-      Blocks.LEVER,
-      Blocks.REPEATER,
-      Blocks.REDSTONE_WIRE,
-      Blocks.CAKE,
-      Blocks.COMPOSTER,
-      Blocks.DRAGON_EGG
+      Blocks.RESPAWN_ANCHOR, Blocks.NOTE_BLOCK, Blocks.LEVER, Blocks.REPEATER, Blocks.REDSTONE_WIRE, Blocks.CAKE, Blocks.COMPOSTER, Blocks.DRAGON_EGG
    );
    private static final Long2IntOpenHashMap PLACED_AT = new Long2IntOpenHashMap();
    private static float measuredRtt;
@@ -117,9 +110,7 @@ public final class Crystals {
          return false;
       }
 
-      Box space = new Box(
-         above.getX(), above.getY(), above.getZ(), above.getX() + 1.0, above.getY() + 2.0, above.getZ() + 1.0
-      );
+      Box space = new Box(above.getX(), above.getY(), above.getZ(), above.getX() + 1.0, above.getY() + 2.0, above.getZ() + 1.0);
 
       for (Entity entity : level.getOtherEntities(ignore, space)) {
          if (entity.isAlive()) {
@@ -207,25 +198,20 @@ public final class Crystals {
    public static boolean letsClickThrough(ItemStack stack, BlockState clicked) {
       if (stack.isEmpty()) {
          return true;
-      } else if (!stack.contains(DataComponentTypes.CONSUMABLE) && !stack.contains(DataComponentTypes.BLOCKS_ATTACKS) && !stack.contains(DataComponentTypes.KINETIC_WEAPON)) {
-         EquippableComponent equippable = (EquippableComponent)stack.get(DataComponentTypes.EQUIPPABLE);
+      } else if (!stack.contains(DataComponentTypes.CONSUMABLE)
+         && !stack.contains(DataComponentTypes.BLOCKS_ATTACKS)
+         && !stack.contains(DataComponentTypes.KINETIC_WEAPON)) {
+         EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
          return equippable != null && equippable.swappable()
             ? false
-            : stack.isIn(ItemTags.SWORDS)
-               || stack.isOf(Items.MACE)
-               || stack.isOf(Items.TOTEM_OF_UNDYING)
-               || stack.isIn(ItemTags.AXES) && isBase(clicked);
+            : stack.isIn(ItemTags.SWORDS) || stack.isOf(Items.MACE) || stack.isOf(Items.TOTEM_OF_UNDYING) || stack.isIn(ItemTags.AXES) && isBase(clicked);
       } else {
          return false;
       }
    }
 
    public static boolean isCombatItem(ItemStack stack) {
-      return stack.isEmpty()
-         || stack.isIn(ItemTags.SWORDS)
-         || stack.isIn(ItemTags.AXES)
-         || stack.isOf(Items.MACE)
-         || stack.isOf(Items.TOTEM_OF_UNDYING);
+      return stack.isEmpty() || stack.isIn(ItemTags.SWORDS) || stack.isIn(ItemTags.AXES) || stack.isOf(Items.MACE) || stack.isOf(Items.TOTEM_OF_UNDYING);
    }
 
    public static int hotbarSlotOf(PlayerInventory inventory, Item item) {
@@ -256,9 +242,7 @@ public final class Crystals {
 
    public static boolean rightClick(MinecraftClient mc, ClientPlayerEntity player, BlockHitResult hit) {
       if (!MeleeAttacks.actedThisTick(player) && MeleeAttacks.handsFree(mc, player)) {
-         Hand hand = letsClickThrough(player.getMainHandStack(), mc.world.getBlockState(hit.getBlockPos()))
-            ? Hand.OFF_HAND
-            : Hand.MAIN_HAND;
+         Hand hand = letsClickThrough(player.getMainHandStack(), mc.world.getBlockState(hit.getBlockPos())) ? Hand.OFF_HAND : Hand.MAIN_HAND;
          ItemStack stack = player.getStackInHand(hand);
          if (!stack.isItemEnabled(mc.world.getEnabledFeatures())) {
             return false;
@@ -330,7 +314,7 @@ public final class Crystals {
       damage.setBaseValue(player.getAttributeBaseValue(EntityAttributes.ATTACK_DAMAGE));
 
       for (StatusEffectInstance effect : player.getStatusEffects()) {
-         ((StatusEffect)effect.getEffectType().value()).forEachAttributeModifier(effect.getAmplifier(), (attribute, modifier) -> include(damage, attribute, modifier));
+         effect.getEffectType().value().forEachAttributeModifier(effect.getAmplifier(), (attribute, modifier) -> include(damage, attribute, modifier));
       }
 
       for (EquipmentSlot slot : EquipmentSlot.VALUES) {
@@ -423,6 +407,11 @@ public final class Crystals {
    private static boolean sent(ClientPlayerEntity player, int tick, int window) {
       int age = player.age - tick;
       return age >= 0 && age < window;
+   }
+
+   public static int humanGap() {
+      double roll = ThreadLocalRandom.current().nextDouble();
+      return roll < 0.7 ? 2 : (roll < 0.95 ? 3 : 4);
    }
 
    public static void forgetRtt() {

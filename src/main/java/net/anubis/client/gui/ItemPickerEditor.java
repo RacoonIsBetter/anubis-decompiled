@@ -22,15 +22,15 @@ import net.anubis.client.module.setting.StringSetting;
 import net.anubis.client.util.ItemEnchants;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.enchantment.Enchantment;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.util.Identifier;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.Registries;
-import net.minecraft.component.DataComponentTypes;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.util.Identifier;
 
 @Environment(EnvType.CLIENT)
 final class ItemPickerEditor {
@@ -251,10 +251,11 @@ final class ItemPickerEditor {
       ImGui.textUnformatted(setting.name());
       List<StringSetting.Preset> presets = setting.presets();
       String value = setting.get().trim();
+      String key = value.toLowerCase(Locale.ROOT).replace(' ', '_');
       StringSetting.Preset chosen = null;
 
       for (StringSetting.Preset preset : presets) {
-         if (preset.value().equalsIgnoreCase(value)) {
+         if (preset.value().equalsIgnoreCase(key)) {
             chosen = preset;
          }
       }
@@ -1200,8 +1201,8 @@ final class ItemPickerEditor {
 
          for (RegistryEntry<Enchantment> holder : all) {
             if (ItemEnchants.key(ItemEnchants.path(holder)).equals(entry.getKey())) {
-               name = ((Enchantment)holder.value()).description().getString();
-               max = ((Enchantment)holder.value()).getMaxLevel();
+               name = holder.value().description().getString();
+               max = holder.value().getMaxLevel();
                break;
             }
          }
@@ -1393,8 +1394,8 @@ final class ItemPickerEditor {
          this.holder = holder;
          this.path = ItemEnchants.path(holder);
          this.key = ItemEnchants.key(this.path);
-         this.name = ((Enchantment)holder.value()).description().getString();
-         this.max = Math.max(1, ((Enchantment)holder.value()).getMaxLevel());
+         this.name = holder.value().description().getString();
+         this.max = Math.max(1, holder.value().getMaxLevel());
          this.level = this.max;
       }
    }

@@ -1,11 +1,11 @@
 package net.anubis.client.module.impl.misc;
 
-import com.mojang.brigadier.suggestion.Suggestion;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -17,6 +17,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.anubis.client.chat.ModuleChat;
 import net.anubis.client.event.EventHandler;
 import net.anubis.client.event.impl.PacketReceiveNettyEvent;
@@ -32,47 +34,47 @@ import net.anubis.client.util.antivanish.AntiVanishText;
 import net.anubis.client.util.staff.ShardTracker;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.block.BlockState;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.ProjectileEntity;
-import net.minecraft.world.GameMode;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.text.Text;
-import net.minecraft.text.TranslatableTextContent;
 import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.s2c.play.CommandSuggestionsS2CPacket;
-import net.minecraft.network.packet.s2c.play.ExplosionS2CPacket;
-import net.minecraft.network.packet.s2c.play.ParticleS2CPacket;
-import net.minecraft.block.BlockState;
-import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
+import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
+import net.minecraft.network.packet.s2c.play.BundleS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket;
-import net.minecraft.state.property.Properties;
+import net.minecraft.network.packet.s2c.play.ExplosionS2CPacket;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
+import net.minecraft.network.packet.s2c.play.ParticleS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlaySoundFromEntityS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket;
-import net.minecraft.network.packet.c2s.play.RequestCommandCompletionsC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
-import net.minecraft.util.Identifier;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
+import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
-import net.minecraft.registry.Registries;
-import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket.Entry;
+import net.minecraft.network.packet.s2c.play.TeamS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket.Action;
+import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket.Entry;
+import net.minecraft.network.packet.s2c.play.TeamS2CPacket.Operation;
+import net.minecraft.registry.Registries;
+import net.minecraft.scoreboard.Team;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.state.property.Properties;
+import net.minecraft.text.Text;
+import net.minecraft.text.TranslatableTextContent;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.GameMode;
 
 @Environment(EnvType.CLIENT)
 public final class AntiVanishModule extends ClientModule {
    private static final MinecraftClient MC = MinecraftClient.getInstance();
-   private static final String PROBE_COMMAND = "minecraft:msg";
    private static final int SENSOR_RANGE = 64;
    private static final long SIGNAL_WINDOW_MS = 15000L;
    private static final long DETECTION_TTL_MS = 20000L;
@@ -85,6 +87,23 @@ public final class AntiVanishModule extends ClientModule {
    private static final long SELF_PLACE_TTL_MS = 6000L;
    private static final long CONTAINER_SELF_GRACE_MS = 2500L;
    private static final long SPELL_SETTLE_MS = 1000L;
+   private static final long GOLIATH_QUIET_MS = 4000L;
+   private static final long HINT_HOLD_MS = 1000L;
+   private static final long TAB_PAIR_MS = 1000L;
+   private static final long TEAM_BATCH_MS = 50L;
+   private static final int TEAM_BATCH = 5;
+   private static final long HINT_MEMORY_MS = 5000L;
+   private static final long ARRIVAL_REPEAT_MS = 60000L;
+   private static final int STAFF_RANK_MAX = 8;
+   private static final Pattern RANK_TEAM = Pattern.compile("(\\d{2})-(.+)-(?:true|false)");
+   private static final Set<Action> ORDER_ONLY = EnumSet.of(Action.UPDATE_DISPLAY_NAME, Action.UPDATE_LIST_ORDER);
+   private final ConcurrentLinkedQueue<AntiVanishModule.Hint> hints = new ConcurrentLinkedQueue<>();
+   private final List<AntiVanishModule.Hint> heldHints = new ArrayList<>();
+   private final Deque<AntiVanishModule.Hint> tabMoves = new ArrayDeque<>();
+   private final Deque<Long> teamChanges = new ArrayDeque<>();
+   private final Map<UUID, String> tabNames = new HashMap<>();
+   private final Map<String, Long> arrivals = new HashMap<>();
+   private volatile long quietUntilMs;
    private final ConcurrentLinkedQueue<AntiVanishModule.Observation> observations = new ConcurrentLinkedQueue<>();
    private final Map<UUID, AntiVanishModule.KnownPlayer> knownPlayers = new HashMap<>();
    private final Map<String, AntiVanishModule.Detection> detections = new LinkedHashMap<>();
@@ -101,9 +120,6 @@ public final class AntiVanishModule extends ClientModule {
    private final Map<String, AntiVanishModule.HiddenSpell> hiddenSpells = new LinkedHashMap<>();
    private final Deque<AntiVanishModule.RecentMessage> recentMessages = new ArrayDeque<>();
    private boolean serverSendsLeaveMessages;
-   private final Set<Integer> completionRequestIds = ConcurrentHashMap.newKeySet();
-   private volatile List<String> pendingCompletionNames;
-   private int nextCompletionId = 30000;
    private static final long RECENT_MESSAGE_TTL_MS = 8000L;
    private static final long TRUSTED_LISTED_MS = 1500L;
    private final Map<UUID, Long> listedSinceMs = new HashMap<>();
@@ -151,11 +167,7 @@ public final class AntiVanishModule extends ClientModule {
 
          this.drainObservations();
          this.processPendingVanishes();
-         this.processCompletionProbe();
-         if (this.tickCounter % 100 == 0) {
-            this.sendCompletionProbe();
-         }
-
+         this.judgeHints();
          if (this.tickCounter % 10 == 0) {
             this.trackListedPlayers();
             this.reviewSpells();
@@ -196,7 +208,10 @@ public final class AntiVanishModule extends ClientModule {
                markSelfMultiBlockFootprint(adjacent, itemPath, this.selfPlacedBlocks, until);
             }
          } else {
-            if (packet instanceof PlayerActionC2SPacket || packet instanceof PlayerInteractItemC2SPacket || packet instanceof PlayerInteractEntityC2SPacket || packet instanceof HandSwingC2SPacket) {
+            if (packet instanceof PlayerActionC2SPacket
+               || packet instanceof PlayerInteractItemC2SPacket
+               || packet instanceof PlayerInteractEntityC2SPacket
+               || packet instanceof HandSwingC2SPacket) {
                this.lastLocalActionMs = System.currentTimeMillis();
             }
          }
@@ -237,91 +252,252 @@ public final class AntiVanishModule extends ClientModule {
    }
 
    private boolean handleInbound(Packet<?> packet) {
-      if (packet instanceof PlayerRemoveS2CPacket remove) {
-         if (remove.profileIds().size() < 4) {
-            for (UUID id : remove.profileIds()) {
-               this.observations.offer(AntiVanishModule.Observation.tabRemove(id));
-            }
-         }
-      } else if (packet instanceof PlayerListS2CPacket info && info.getActions().contains(Action.UPDATE_LISTED)) {
-         int unlisted = 0;
-
-         for (Entry entry : info.getEntries()) {
-            if (entry != null && !entry.listed()) {
-               unlisted++;
-            }
+      if (packet instanceof BundleS2CPacket bundle) {
+         for (Packet<?> part : bundle.getPackets()) {
+            this.handleInbound(part);
          }
 
-         if (unlisted > 0 && unlisted < 4) {
-            for (Entry entry : info.getEntries()) {
-               if (entry != null && !entry.listed()) {
-                  this.observations.offer(AntiVanishModule.Observation.tabHide(entry.profileId()));
-               }
-            }
-         }
-      } else if (packet instanceof PlayerListS2CPacket info && info.getActions().contains(Action.UPDATE_GAME_MODE)) {
-         this.queueGamemodeUpdates(info);
-      } else if (packet instanceof GameMessageS2CPacket chat) {
-         String text = chat.content() == null ? "" : chat.content().getString();
-         if (!text.isBlank()) {
-            this.observations.offer(AntiVanishModule.Observation.systemChat(text));
-         }
-
-         String departedName = departedPlayerName(chat.content());
-         if (!departedName.isBlank()) {
-            this.observations.offer(AntiVanishModule.Observation.playerLeft(departedName));
-         }
+         return false;
       } else {
-         if (packet instanceof CommandSuggestionsS2CPacket suggestions && this.completionRequestIds.remove(suggestions.id())) {
-            List<String> names = new ArrayList<>();
-
-            for (Suggestion suggestion : suggestions.getSuggestions().getList()) {
-               String text = suggestion.getText();
-               if (text != null && !text.isBlank()) {
-                  names.add(text.trim());
+         if (packet instanceof PlayerRemoveS2CPacket remove) {
+            if (remove.profileIds().size() < 4) {
+               for (UUID id : remove.profileIds()) {
+                  this.observations.offer(AntiVanishModule.Observation.tabRemove(id));
                }
             }
 
-            this.pendingCompletionNames = names;
-            return true;
-         }
+            long now = System.currentTimeMillis();
 
-         if (packet instanceof EntityTrackerUpdateS2CPacket metadata) {
+            for (UUID id : remove.profileIds()) {
+               this.hints.offer(new AntiVanishModule.Hint(AntiVanishModule.HintKind.TAB_OUT, id, null, -1, now));
+            }
+         } else if (packet instanceof PlayerListS2CPacket info) {
+            this.queueTabHints(info);
+            if (info.getActions().contains(Action.UPDATE_LISTED)) {
+               int unlisted = 0;
+
+               for (Entry entry : info.getEntries()) {
+                  if (entry != null && !entry.listed()) {
+                     unlisted++;
+                  }
+               }
+
+               if (unlisted > 0 && unlisted < 4) {
+                  for (Entry entry : info.getEntries()) {
+                     if (entry != null && !entry.listed()) {
+                        this.observations.offer(AntiVanishModule.Observation.tabHide(entry.profileId()));
+                     }
+                  }
+               }
+            }
+
+            if (info.getActions().contains(Action.UPDATE_GAME_MODE)) {
+               this.queueGamemodeUpdates(info);
+            }
+         } else if (packet instanceof GameMessageS2CPacket chat) {
+            String text = chat.content() == null ? "" : chat.content().getString();
+            if (!text.isBlank()) {
+               this.observations.offer(AntiVanishModule.Observation.systemChat(text));
+            }
+
+            String departedName = departedPlayerName(chat.content());
+            if (!departedName.isBlank()) {
+               this.observations.offer(AntiVanishModule.Observation.playerLeft(departedName));
+            }
+         } else if (packet instanceof EntityTrackerUpdateS2CPacket metadata) {
             this.observations.offer(AntiVanishModule.Observation.entityMetadata(metadata.id()));
          } else if (packet instanceof ExplosionS2CPacket explosion) {
             this.observations.offer(AntiVanishModule.Observation.explosion(explosion.center(), explosion.radius()));
          } else if (packet instanceof PlaySoundFromEntityS2CPacket sound) {
-            this.observations
-               .offer(AntiVanishModule.Observation.entitySound(sound.getEntityId(), soundId(((SoundEvent)sound.getSound().value()).id())));
+            this.observations.offer(AntiVanishModule.Observation.entitySound(sound.getEntityId(), soundId(sound.getSound().value().id())));
          } else if (packet instanceof ParticleS2CPacket particles) {
             Identifier id = Registries.PARTICLE_TYPE.getId(particles.getParameters().getType());
             this.observations
                .offer(
                   AntiVanishModule.Observation.position(
-                     AntiVanishModule.ObservationType.PARTICLE,
-                     particles.getX(),
-                     particles.getY(),
-                     particles.getZ(),
-                     id == null ? "" : id.toString()
+                     AntiVanishModule.ObservationType.PARTICLE, particles.getX(), particles.getY(), particles.getZ(), id == null ? "" : id.toString()
                   )
                );
          } else if (packet instanceof PlaySoundS2CPacket sound) {
             this.onSoundPacket(sound);
+         } else if (packet instanceof TeamS2CPacket team) {
+            this.queueTeamHint(team);
+         }
+
+         return false;
+      }
+   }
+
+   private void queueTabHints(PlayerListS2CPacket info) {
+      long now = System.currentTimeMillis();
+      if (info.getActions().contains(Action.ADD_PLAYER)) {
+         for (Entry entry : info.getEntries()) {
+            if (entry != null && entry.profile() != null && entry.profile().name() != null) {
+               this.hints.offer(new AntiVanishModule.Hint(AntiVanishModule.HintKind.TAB_IN, entry.profileId(), entry.profile().name(), -1, now));
+            }
+         }
+      } else if (ORDER_ONLY.equals(info.getActions()) && info.getEntries().size() < 4) {
+         for (Entry entry : info.getEntries()) {
+            if (entry != null && entry.profileId() != null) {
+               this.hints.offer(new AntiVanishModule.Hint(AntiVanishModule.HintKind.ORDER, entry.profileId(), null, -1, now));
+            }
+         }
+      }
+   }
+
+   private void queueTeamHint(TeamS2CPacket team) {
+      Operation action = team.getTeamOperation();
+      Matcher rank = action == null ? null : RANK_TEAM.matcher(team.getTeamName());
+      if (rank != null && rank.matches()) {
+         String name = rank.group(2);
+         boolean created = action == Operation.ADD;
+         if (!created || team.getPlayerNames().isEmpty() || !team.getPlayerNames().stream().noneMatch(name::equalsIgnoreCase)) {
+            this.hints
+               .offer(
+                  new AntiVanishModule.Hint(
+                     created ? AntiVanishModule.HintKind.TEAM_UP : AntiVanishModule.HintKind.TEAM_DOWN,
+                     null,
+                     name,
+                     Integer.parseInt(rank.group(1)),
+                     System.currentTimeMillis()
+                  )
+               );
+         }
+      }
+   }
+
+   private void judgeHints() {
+      AntiVanishModule.Hint hint;
+      while ((hint = this.hints.poll()) != null) {
+         switch (hint.kind()) {
+            case ORDER:
+               this.heldHints.add(hint);
+               break;
+            case TEAM_UP:
+            case TEAM_DOWN:
+               this.teamChanges.addLast(hint.atMs());
+               this.heldHints.add(hint);
+               break;
+            case TAB_IN:
+               this.tabMoves.addLast(hint);
+               break;
+            case TAB_OUT:
+               String name = this.tabNames.get(hint.id());
+               if (name != null) {
+                  this.tabMoves.addLast(new AntiVanishModule.Hint(AntiVanishModule.HintKind.TAB_OUT, hint.id(), name, -1, hint.atMs()));
+               }
          }
       }
 
-      return false;
+      long now = System.currentTimeMillis();
+      Iterator<AntiVanishModule.Hint> it = this.heldHints.iterator();
+
+      while (it.hasNext()) {
+         AntiVanishModule.Hint hintx = it.next();
+         if (now - hintx.atMs() >= 1000L) {
+            it.remove();
+            this.judge(hintx);
+         }
+      }
+
+      while (!this.tabMoves.isEmpty() && now - this.tabMoves.peekFirst().atMs() > 5000L) {
+         this.tabMoves.removeFirst();
+      }
+
+      while (!this.teamChanges.isEmpty() && now - this.teamChanges.peekFirst() > 5000L) {
+         this.teamChanges.removeFirst();
+      }
+
+      if (this.tabNames.size() > 4096) {
+         this.tabNames.clear();
+      }
+
+      for (PlayerListEntry info : MC.getNetworkHandler().getPlayerList()) {
+         if (info.getProfile() != null && info.getProfile().name() != null) {
+            this.tabNames.put(info.getProfile().id(), info.getProfile().name());
+         }
+      }
+   }
+
+   private void judge(AntiVanishModule.Hint hint) {
+      if (hint.atMs() >= this.quietUntilMs) {
+         PlayerListEntry info = hint.id() != null
+            ? MC.getNetworkHandler().getPlayerListEntry(hint.id())
+            : MC.getNetworkHandler().getCaseInsensitivePlayerInfo(hint.name());
+         String name = hint.name() != null ? hint.name() : (info != null && info.getProfile() != null ? info.getProfile().name() : null);
+         if (name != null && !name.equalsIgnoreCase(MC.player.getGameProfile().name())) {
+            int rank = hint.rank() >= 0 ? hint.rank() : teamRank(info);
+            if (StaffListModule.isStaffName(name) || rank >= 0 && rank <= 8) {
+               UUID uuid = info != null && info.getProfile() != null ? info.getProfile().id() : hint.id();
+               switch (hint.kind()) {
+                  case ORDER:
+                     this.arrived(uuid, name, "tab re-sort");
+                     break;
+                  case TEAM_UP:
+                     if (this.teamOnly(hint)) {
+                        this.arrived(uuid, name, "team created");
+                     }
+                     break;
+                  case TEAM_DOWN:
+                     if (this.teamOnly(hint)) {
+                        this.departed(name, "team removed");
+                     }
+               }
+            }
+         }
+      }
+   }
+
+   private boolean teamOnly(AntiVanishModule.Hint hint) {
+      int batch = 0;
+
+      for (long at : this.teamChanges) {
+         if (Math.abs(at - hint.atMs()) <= 50L) {
+            if (++batch >= 5) {
+               return false;
+            }
+         }
+      }
+
+      for (AntiVanishModule.Hint move : this.tabMoves) {
+         if (move.name().equalsIgnoreCase(hint.name()) && Math.abs(move.atMs() - hint.atMs()) <= 1000L) {
+            return false;
+         }
+      }
+
+      return true;
+   }
+
+   private static int teamRank(PlayerListEntry info) {
+      Team team = info == null ? null : info.getScoreboardTeam();
+      Matcher rank = team == null ? null : RANK_TEAM.matcher(team.getName());
+      return rank != null && rank.matches() ? Integer.parseInt(rank.group(1)) : -1;
+   }
+
+   private void arrived(UUID uuid, String name, String how) {
+      long now = System.currentTimeMillis();
+      Long last = this.arrivals.put(spellKey(name), now);
+      if (uuid != null) {
+         StaffListModule.provenHere(uuid, name);
+      }
+
+      if (last == null || now - last >= 60000L) {
+         this.news(name, ModuleChat.body().text("is ").danger("on your goliath").build(), how);
+         this.watchingYou(name, new AntiVanishModule.RegionProof(uuid, -1));
+      }
+   }
+
+   private void departed(String name, String how) {
+      if (this.arrivals.remove(spellKey(name)) != null) {
+         this.news(name, ModuleChat.body().good("left your goliath").build(), how);
+      }
    }
 
    private void onSoundPacket(PlaySoundS2CPacket packet) {
       if (packet != null && packet.getSound() != null && packet.getSound().value() != null) {
-         String id = soundId(((SoundEvent)packet.getSound().value()).id());
+         String id = soundId(packet.getSound().value().id());
          this.observations
-            .offer(
-               AntiVanishModule.Observation.position(
-                  AntiVanishModule.ObservationType.POSITIONAL_SOUND, packet.getX(), packet.getY(), packet.getZ(), id
-               )
-            );
+            .offer(AntiVanishModule.Observation.position(AntiVanishModule.ObservationType.POSITIONAL_SOUND, packet.getX(), packet.getY(), packet.getZ(), id));
       }
    }
 
@@ -533,16 +709,6 @@ public final class AntiVanishModule extends ClientModule {
       return null;
    }
 
-   private UUID knownUuid(String name) {
-      for (AntiVanishModule.KnownPlayer known : this.knownPlayers.values()) {
-         if (known.name.equalsIgnoreCase(name)) {
-            return known.uuid;
-         }
-      }
-
-      return null;
-   }
-
    private void confirmDeparture(String displayedName) {
       long now = System.currentTimeMillis();
 
@@ -634,62 +800,6 @@ public final class AntiVanishModule extends ClientModule {
          return false;
       } else {
          return false;
-      }
-   }
-
-   private void sendCompletionProbe() {
-      if (MC.getNetworkHandler() != null) {
-         String command = "minecraft:msg";
-         int id = this.nextCompletionId++;
-         if (this.nextCompletionId > 40000) {
-            this.nextCompletionId = 30000;
-         }
-
-         this.completionRequestIds.add(id);
-
-         while (this.completionRequestIds.size() > 8) {
-            this.completionRequestIds.remove(this.completionRequestIds.iterator().next());
-         }
-
-         try {
-            MC.getNetworkHandler().sendPacket(new RequestCommandCompletionsC2SPacket(id, command.trim() + " "));
-         } catch (Throwable var4) {
-         }
-      }
-   }
-
-   private void processCompletionProbe() {
-      List<String> current = this.pendingCompletionNames;
-      if (current != null) {
-         this.pendingCompletionNames = null;
-         if (MC.getNetworkHandler() != null && MC.player != null) {
-            Set<String> tabNames = new HashSet<>();
-
-            for (PlayerListEntry info : MC.getNetworkHandler().getPlayerList()) {
-               if (info != null && info.getProfile() != null && info.getProfile().name() != null) {
-                  tabNames.add(info.getProfile().name().toLowerCase(Locale.ROOT));
-               }
-            }
-
-            String self = MC.player.getName().getString();
-            List<String> hidden = new ArrayList<>();
-
-            for (String name : current) {
-               if (StaffListModule.isStaffName(name)
-                  && AntiVanishText.isPlausiblePlayerName(name)
-                  && !name.equalsIgnoreCase(self)
-                  && !tabNames.contains(name.toLowerCase(Locale.ROOT))
-                  && !this.recentMessageNames(name)) {
-                  hidden.add(name);
-               }
-            }
-
-            if (!hidden.isEmpty() && hidden.size() <= 3) {
-               for (String name : hidden) {
-                  this.reportHidden(this.knownUuid(name), name, false, "Vanish Event: hidden but targetable", "off TAB, still targetable", 90);
-               }
-            }
-         }
       }
    }
 
@@ -993,6 +1103,7 @@ public final class AntiVanishModule extends ClientModule {
       if (uuid != null && (MC.player == null || !MC.player.getUuid().equals(uuid))) {
          AntiVanishModule.KnownPlayer known = this.knownPlayers.get(uuid);
          if (known != null && StaffListModule.isStaffName(known.name)) {
+            this.arrivals.put(spellKey(known.name), System.currentTimeMillis());
             if (GameMode.SPECTATOR.getId().equals(gameMode)) {
                if (this.credibleSubject(uuid, known.name)) {
                   this.reportHidden(uuid, known.name, true, "Vanish Event: switched to spectator", "", 100);
@@ -1226,7 +1337,7 @@ public final class AntiVanishModule extends ClientModule {
          BlockPos pos = center.add(0, dy, 0);
          BlockState state = MC.world.getBlockState(pos);
          long key = pos.asLong();
-         boolean powered = state.contains(Properties.POWERED) && (Boolean)state.get(Properties.POWERED);
+         boolean powered = state.contains(Properties.POWERED) && state.get(Properties.POWERED);
          if (powered || MC.world.isReceivingRedstonePower(pos)) {
             this.automatedMechanisms.put(key, now + 5000L);
             return true;
@@ -1289,9 +1400,13 @@ public final class AntiVanishModule extends ClientModule {
       this.recentMessages.clear();
       this.listedSinceMs.clear();
       this.serverSendsLeaveMessages = false;
-      this.completionRequestIds.clear();
-      this.pendingCompletionNames = null;
-      this.nextCompletionId = 30000;
+      this.hints.clear();
+      this.heldHints.clear();
+      this.tabMoves.clear();
+      this.teamChanges.clear();
+      this.tabNames.clear();
+      this.arrivals.clear();
+      this.quietUntilMs = System.currentTimeMillis() + 4000L;
    }
 
    @Environment(EnvType.CLIENT)
@@ -1342,6 +1457,19 @@ public final class AntiVanishModule extends ClientModule {
    }
 
    @Environment(EnvType.CLIENT)
+   private record Hint(AntiVanishModule.HintKind kind, UUID id, String name, int rank, long atMs) {
+   }
+
+   @Environment(EnvType.CLIENT)
+   private enum HintKind {
+      ORDER,
+      TEAM_UP,
+      TEAM_DOWN,
+      TAB_IN,
+      TAB_OUT;
+   }
+
+   @Environment(EnvType.CLIENT)
    public record HudEntry(String name, String reason) {
    }
 
@@ -1376,9 +1504,7 @@ public final class AntiVanishModule extends ClientModule {
       }
 
       static AntiVanishModule.Observation explosion(Vec3d center, float radius) {
-         return new AntiVanishModule.Observation(
-            AntiVanishModule.ObservationType.EXPLOSION, null, -1, center.x, center.y, center.z, Float.toString(radius)
-         );
+         return new AntiVanishModule.Observation(AntiVanishModule.ObservationType.EXPLOSION, null, -1, center.x, center.y, center.z, Float.toString(radius));
       }
 
       static AntiVanishModule.Observation entitySound(int id, String sound) {

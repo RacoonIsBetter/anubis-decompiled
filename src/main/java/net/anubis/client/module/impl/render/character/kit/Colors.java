@@ -7,7 +7,6 @@ import net.fabricmc.api.Environment;
 public final class Colors {
    public static final int WHITE = -1;
    public static final int BLACK = -16777216;
-   public static final int CLEAR = 0;
 
    private Colors() {
    }

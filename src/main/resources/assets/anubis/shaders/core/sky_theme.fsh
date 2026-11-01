@@ -38,7 +38,7 @@ vec3 hash33(vec3 p) {
     return fract((p.xxy + p.yxx) * p.zyx);
 }
 
-float noise2(vec2 p) {
+float skyNoise2(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);
@@ -49,7 +49,7 @@ float noise2(vec2 p) {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-float noise3(vec3 p) {
+float skyNoise3(vec3 p) {
     vec3 i = floor(p);
     vec3 f = fract(p);
     vec3 u = f * f * (3.0 - 2.0 * f);
@@ -68,7 +68,7 @@ float fbm2(vec2 p) {
     float sum = 0.0;
     float amp = 0.5;
     for (int i = 0; i < 3; i++) {
-        sum += amp * noise2(p);
+        sum += amp * skyNoise2(p);
         p = p * 2.07 + vec2(5.3, 1.7);
         amp *= 0.5;
     }
@@ -79,7 +79,7 @@ float fbm3(vec3 p) {
     float sum = 0.0;
     float amp = 0.5;
     for (int i = 0; i < 5; i++) {
-        sum += amp * noise3(p);
+        sum += amp * skyNoise3(p);
         p = p * 2.02 + vec3(13.1, 7.7, 3.3);
         amp *= 0.5;
     }
@@ -165,7 +165,7 @@ vec3 auroraLight(vec3 dir, float time) {
         vec2 at = spread * (1.0 + layer * depth) + drift;
         float field = fbm2(vec2(at.x * 0.22, at.y * 0.9) + vec2(sway * 2.2, time * 0.03));
         float fold = pow(1.0 - abs(field * 2.0 - 1.0), 10.0);
-        float rays = 0.45 + 0.55 * noise2(vec2(at.x * 1.7, at.y * 0.35) + vec2(time * 0.08, 0.0));
+        float rays = 0.45 + 0.55 * skyNoise2(vec2(at.x * 1.7, at.y * 0.35) + vec2(time * 0.08, 0.0));
         vec3 tint = mix(ColorLow.rgb, ColorHigh.rgb, layer);
         sum += tint * fold * rays * exp(-layer * 2.6);
     }
@@ -183,7 +183,7 @@ vec3 northernSky(vec3 dir, float time) {
 
 float ringDensity(float r) {
     float body = smoothstep(1.32, 1.40, r) * (1.0 - smoothstep(2.10, 2.24, r));
-    float ringlets = 0.55 + 0.45 * noise2(vec2(r * 26.0, 0.5));
+    float ringlets = 0.55 + 0.45 * skyNoise2(vec2(r * 26.0, 0.5));
     float bands = 0.70 + 0.30 * sin(r * 19.0);
     float gap = smoothstep(0.012, 0.035, abs(r - 1.80));
     return body * ringlets * bands * gap;
@@ -311,20 +311,10 @@ void main() {
     vec3 dir = normalize(skyDirection);
     float time = Look.z;
     vec3 color;
-#if defined(ANUBIS_SKY_MODE) && ANUBIS_SKY_MODE == 0
-    color = deepSpace(dir, time, Amounts.y);
-#elif defined(ANUBIS_SKY_MODE) && ANUBIS_SKY_MODE == 1
-    color = northernSky(dir, time);
-#elif defined(ANUBIS_SKY_MODE) && ANUBIS_SKY_MODE == 2
-    color = ringedPlanet(dir, time);
-#elif defined(ANUBIS_SKY_MODE) && ANUBIS_SKY_MODE == 3
-    color = blackHole(dir, time);
-#else
     if (Look.x < 0.5) color = deepSpace(dir, time, Amounts.y);
     else if (Look.x < 1.5) color = northernSky(dir, time);
     else if (Look.x < 2.5) color = ringedPlanet(dir, time);
     else color = blackHole(dir, time);
-#endif
     color = 1.0 - exp(-color * Look.w * 1.4);
     fragColor = vec4(color, Look.y);
 }

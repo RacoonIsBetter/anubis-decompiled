@@ -11,12 +11,12 @@ import net.anubis.client.chat.ModuleChat;
 import net.anubis.client.module.ClientModule;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.item.ItemStack;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
+import net.minecraft.screen.slot.SlotActionType;
 
 @Environment(EnvType.CLIENT)
 final class AuctionHouse {
@@ -82,7 +82,8 @@ final class AuctionHouse {
          long next = Math.max(cheapest - undercut, product.minPrice());
          if (stock.price > 0L && cheapest < stock.price) {
             long drop = stock.price - cheapest;
-            if (drop > undercut * this.config.ignoreDrops()) {
+            double deep = undercut > 0L ? undercut * this.config.ignoreDrops() : stock.price / 2.0;
+            if (drop > deep) {
                this.say(
                   ModuleChat.body()
                      .name(name)
@@ -476,7 +477,10 @@ final class AuctionHouse {
                () -> {
                   Dialogs.View view = Dialogs.current(Gui.mc());
                   if (view != null) {
-                     if (view.dialog() != pressedDialog[0] && (view.titled("sure") || view.titled("confirm") || view.titled("sell"))) {
+                     if (view.dialog() != pressedDialog[0]
+                        && (view.titled("sure") || view.titled("confirm") || view.titled("sell"))
+                        && !view.titled("buy")
+                        && !view.titled("purchase")) {
                         Dialogs.Button yes = view.labelled("yes", "confirm");
                         if (yes != null && Dialogs.press(Gui.mc(), view, yes, Map.of())) {
                            pressedDialog[0] = view.dialog();
@@ -490,9 +494,9 @@ final class AuctionHouse {
                      ClientPlayerEntity player = Gui.player();
                      int sync = player.currentScreenHandler.syncId;
                      ItemStack button = Gui.slotNow(15);
-                     if (sync != pressedChest[0]
-                        && !button.isEmpty()
-                        && Registries.ITEM.getId(button.getItem()).getPath().contains("lime")) {
+                     String title = ServerText.normalize(Gui.mc().currentScreen.getTitle());
+                     boolean otherMenu = title.contains("buy") || title.contains("purchase") || title.contains("(page") || title.contains("order");
+                     if (sync != pressedChest[0] && !otherMenu && !button.isEmpty() && Registries.ITEM.getId(button.getItem()).getPath().contains("lime")) {
                         Gui.mc().interactionManager.clickSlot(sync, 15, 0, SlotActionType.PICKUP, player);
                         pressedChest[0] = sync;
                         confirmed[0] = true;

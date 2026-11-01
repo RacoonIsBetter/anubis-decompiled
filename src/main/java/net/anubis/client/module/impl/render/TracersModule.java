@@ -20,17 +20,16 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.TracerEngine;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.entity.Entity;
-import net.minecraft.util.Util;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.text.Style;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.text.Style;
 import net.minecraft.text.TextColor;
+import net.minecraft.util.Util;
+import net.minecraft.util.math.Vec3d;
 import org.joml.Vector4f;
 
 @Environment(EnvType.CLIENT)
@@ -38,8 +37,6 @@ public final class TracersModule extends ClientModule implements HudOverlayProvi
    private static final double DISTANCE_COLOR_RANGE = 60.0;
    private static final float ARROW_TIP = 0.73205F;
    private static final int WHITE = 16777215;
-   private final Vector4f mobileClip = new Vector4f();
-   private ArrayList<Entity> mobileTargets;
    private final BooleanSetting players = this.addSetting("players", new BooleanSetting("Players", true));
    private final BooleanSetting animals = this.addSetting("animals", new BooleanSetting("Animals", false));
    private final BooleanSetting waterAnimals = this.addSetting("water-animals", new BooleanSetting("Water Animals", false));
@@ -95,31 +92,20 @@ public final class TracersModule extends ClientModule implements HudOverlayProvi
    public void onRender3D(Render3DEvent event) {
       MinecraftClient mc = MinecraftClient.getInstance();
       if (!mc.options.hudHidden && this.style.is("Lines")) {
-         boolean mobile = MobilePerformance.active();
+         for (Entity entity : this.targets(mc)) {
+            int color = this.colorOf(mc, entity);
+            Vec3d feet = entity.getLerpedPos(event.partialTick);
+            double height = entity.getBoundingBox().getLengthY();
 
-         try {
-            for (Entity entity : this.targets(mc)) {
-               int color = this.colorOf(mc, entity);
-               Vec3d feet = entity.getLerpedPos(event.partialTick);
-               double height = entity.getBoundingBox().getLengthY();
-
-               double up = switch (this.target.get()) {
-                  case "Head" -> height;
-                  case "Body" -> height / 2.0;
-                  default -> 0.0;
-               };
-               if (mobile) {
-                  TracerEngine.draw(feet.x, feet.y + up, feet.z, color);
-               } else {
-                  TracerEngine.draw(feet.add(0.0, up, 0.0), color);
-               }
-
-               if (this.stem.get()) {
-                  TracerEngine.stem(feet, height, color);
-               }
+            double up = switch (this.target.get()) {
+               case "Head" -> height;
+               case "Body" -> height / 2.0;
+               default -> 0.0;
+            };
+            TracerEngine.draw(feet.add(0.0, up, 0.0), color);
+            if (this.stem.get()) {
+               TracerEngine.stem(feet, height, color);
             }
-         } finally {
-            this.clearTargets();
          }
       }
    }
@@ -136,42 +122,26 @@ public final class TracersModule extends ClientModule implements HudOverlayProvi
       float blink = this.blinkOffscreen.get() ? this.blinkAlpha() : 1.0F;
       float reach = this.distanceOffscreen.get();
       float size = this.sizeOffscreen.get();
-      boolean mobile = MobilePerformance.active();
 
-      try {
-         for (Entity entity : this.targets(mc)) {
-            Vector4f clip = mobile ? TracerEngine.clip(entity.getLerpedPos(partialTick), this.mobileClip) : TracerEngine.clip(entity.getLerpedPos(partialTick));
-            if (clip == null) {
-               return;
-            }
-
-            if (!(clip.w > 0.0F) || !(Math.abs(clip.x) < clip.w) || !(Math.abs(clip.y) < clip.w)) {
-               double angle = Math.atan2(-clip.y * screenH, clip.x * screenW);
-               int color = this.colorOf(mc, entity);
-               int alpha = (int)((color >>> 24) * blink);
-               arrow(
-                  dl,
-                  screenW * 0.5F + reach * (float)Math.cos(angle),
-                  screenH * 0.5F + reach * (float)Math.sin(angle),
-                  size,
-                  (float)angle,
-                  GuiPalette.abgr(alpha << 24 | color & 16777215)
-               );
-            }
+      for (Entity entity : this.targets(mc)) {
+         Vector4f clip = TracerEngine.clip(entity.getLerpedPos(partialTick));
+         if (clip == null) {
+            return;
          }
-      } finally {
-         this.clearTargets();
-      }
-   }
 
-   @Override
-   protected void onDisable() {
-      this.clearTargets();
-   }
-
-   private void clearTargets() {
-      if (this.mobileTargets != null) {
-         this.mobileTargets.clear();
+         if (!(clip.w > 0.0F) || !(Math.abs(clip.x) < clip.w) || !(Math.abs(clip.y) < clip.w)) {
+            double angle = Math.atan2(-clip.y * screenH, clip.x * screenW);
+            int color = this.colorOf(mc, entity);
+            int alpha = (int)((color >>> 24) * blink);
+            arrow(
+               dl,
+               screenW * 0.5F + reach * (float)Math.cos(angle),
+               screenH * 0.5F + reach * (float)Math.sin(angle),
+               size,
+               (float)angle,
+               GuiPalette.abgr(alpha << 24 | color & 16777215)
+            );
+         }
       }
    }
 
@@ -181,18 +151,8 @@ public final class TracersModule extends ClientModule implements HudOverlayProvi
          boolean skipSelf = this.ignoreSelf.get() || freecam == null || !freecam.isEnabled();
          double maxSq = (double)this.maxDistance.get() * this.maxDistance.get();
          Vec3d camera = mc.gameRenderer.getCamera().getCameraPos();
-         double view = ((Integer)mc.options.getViewDistance().getValue() + 1) * 16.0;
-         List<Entity> result;
-         if (MobilePerformance.active()) {
-            if (this.mobileTargets == null) {
-               this.mobileTargets = new ArrayList<>();
-            }
-
-            this.mobileTargets.clear();
-            result = this.mobileTargets;
-         } else {
-            result = new ArrayList<>();
-         }
+         double view = (mc.options.getViewDistance().getValue() + 1) * 16.0;
+         List<Entity> result = new ArrayList<>();
 
          for (Entity entity : mc.world.getEntities()) {
             if ((entity != mc.player || !skipSelf)
@@ -292,34 +252,16 @@ public final class TracersModule extends ClientModule implements HudOverlayProvi
       float cos = (float)Math.cos(angle);
       float sin = (float)Math.sin(angle);
       float cx = x - size * 1.26795F / 3.0F;
-      if (MobilePerformance.active()) {
-         float dx0 = x - size - cx;
-         float dy0 = y - size - y;
-         float dx1 = x + size * 0.73205F - cx;
-         float dy1 = y - y;
-         float dx2 = x - size - cx;
-         float dy2 = y + size - y;
-         dl.addTriangleFilled(
-            cx + dx0 * cos - dy0 * sin,
-            y + dx0 * sin + dy0 * cos,
-            cx + dx1 * cos - dy1 * sin,
-            y + dx1 * sin + dy1 * cos,
-            cx + dx2 * cos - dy2 * sin,
-            y + dx2 * sin + dy2 * cos,
-            abgr
-         );
-      } else {
-         float[] px = new float[]{x - size, x + size * 0.73205F, x - size};
-         float[] py = new float[]{y - size, y, y + size};
+      float[] px = new float[]{x - size, x + size * 0.73205F, x - size};
+      float[] py = new float[]{y - size, y, y + size};
 
-         for (int i = 0; i < 3; i++) {
-            float dx = px[i] - cx;
-            float dy = py[i] - y;
-            px[i] = cx + dx * cos - dy * sin;
-            py[i] = y + dx * sin + dy * cos;
-         }
-
-         dl.addTriangleFilled(px[0], py[0], px[1], py[1], px[2], py[2], abgr);
+      for (int i = 0; i < 3; i++) {
+         float dx = px[i] - cx;
+         float dy = py[i] - y;
+         px[i] = cx + dx * cos - dy * sin;
+         py[i] = y + dx * sin + dy * cos;
       }
+
+      dl.addTriangleFilled(px[0], py[0], px[1], py[1], px[2], py[2], abgr);
    }
 }

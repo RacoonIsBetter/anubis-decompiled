@@ -6,16 +6,16 @@ import net.anubis.client.gui.ImGuiScreen;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.util.Util;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
+import net.minecraft.client.gui.screen.multiplayer.MultiplayerWarningScreen;
 import net.minecraft.client.gui.screen.option.AccessibilityOptionsScreen;
 import net.minecraft.client.gui.screen.option.LanguageOptionsScreen;
 import net.minecraft.client.gui.screen.option.OptionsScreen;
-import net.minecraft.client.realms.gui.screen.RealmsMainScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.multiplayer.MultiplayerWarningScreen;
-import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
 import net.minecraft.client.gui.screen.world.SelectWorldScreen;
+import net.minecraft.client.realms.gui.screen.RealmsMainScreen;
+import net.minecraft.util.Util;
 
 @Environment(EnvType.CLIENT)
 public final class MenuContext extends MenuFrame {
@@ -42,6 +42,10 @@ public final class MenuContext extends MenuFrame {
       float k = Math.min(1.0F, dt * 2.5F);
       this.lookX = this.lookX + (targetX - this.lookX) * k;
       this.lookY = this.lookY + (targetY - this.lookY) * k;
+   }
+
+   public boolean accountsAvailable() {
+      return this.openAccounts != null;
    }
 
    public float lookX() {
@@ -86,7 +90,7 @@ public final class MenuContext extends MenuFrame {
 
          Supplier<Screen> next = switch (action) {
             case SINGLEPLAYER -> () -> new SelectWorldScreen(this.screen);
-            case MULTIPLAYER -> () -> (Screen)(mc.options.skipMultiplayerWarning ? new MultiplayerScreen(this.screen) : new MultiplayerWarningScreen(this.screen));
+            case MULTIPLAYER -> () -> mc.options.skipMultiplayerWarning ? new MultiplayerScreen(this.screen) : new MultiplayerWarningScreen(this.screen);
             case REALMS -> () -> new RealmsMainScreen(this.screen);
             case OPTIONS -> () -> new OptionsScreen(this.screen, mc.options);
             case LANGUAGE -> () -> new LanguageOptionsScreen(this.screen, mc.options, mc.getLanguageManager());
@@ -97,7 +101,9 @@ public final class MenuContext extends MenuFrame {
          if (action == MenuAction.QUIT) {
             mc.execute(mc::scheduleStop);
          } else if (action == MenuAction.ACCOUNTS) {
-            this.openAccounts.run();
+            if (this.openAccounts != null) {
+               this.openAccounts.run();
+            }
          } else if (action == MenuAction.CREDITS) {
             this.openCredits.run();
          } else if (action == MenuAction.MODS) {

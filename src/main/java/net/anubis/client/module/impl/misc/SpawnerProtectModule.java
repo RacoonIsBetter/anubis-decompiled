@@ -21,26 +21,26 @@ import net.anubis.client.module.setting.NumberSetting;
 import net.anubis.client.module.setting.StringSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.util.Hand;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.DisconnectedScreen;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.item.ItemStack;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.Block;
+import net.minecraft.text.Text;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.text.Text;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.client.gui.screen.DisconnectedScreen;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.util.math.Vec3d;
 
 @Environment(EnvType.CLIENT)
 public final class SpawnerProtectModule extends ClientModule {
@@ -340,11 +340,7 @@ public final class SpawnerProtectModule extends ClientModule {
                   this.miningTicks++;
                   if (this.miningTicks > 60) {
                      mc.interactionManager
-                        .interactBlock(
-                           player,
-                           Hand.MAIN_HAND,
-                           new BlockHitResult(Vec3d.ofCenter(this.targetBlock), Direction.UP, this.targetBlock, false)
-                        );
+                        .interactBlock(player, Hand.MAIN_HAND, new BlockHitResult(Vec3d.ofCenter(this.targetBlock), Direction.UP, this.targetBlock, false));
                      player.swingHand(Hand.MAIN_HAND);
                      this.miningTicks = 0;
                   }
@@ -407,11 +403,7 @@ public final class SpawnerProtectModule extends ClientModule {
       } else {
          if (this.chestTick % 12 == 0 && this.targetChest != null) {
             mc.interactionManager
-               .interactBlock(
-                  mc.player,
-                  Hand.MAIN_HAND,
-                  new BlockHitResult(Vec3d.ofCenter(this.targetChest), Direction.UP, this.targetChest, false)
-               );
+               .interactBlock(mc.player, Hand.MAIN_HAND, new BlockHitResult(Vec3d.ofCenter(this.targetChest), Direction.UP, this.targetChest, false));
          }
 
          this.chestTick++;
@@ -526,11 +518,7 @@ public final class SpawnerProtectModule extends ClientModule {
             } else {
                BlockPos support = placePos.down();
                mc.interactionManager
-                  .interactBlock(
-                     player,
-                     Hand.MAIN_HAND,
-                     new BlockHitResult(Vec3d.ofCenter(support).add(0.0, 0.5, 0.0), Direction.UP, support, false)
-                  );
+                  .interactBlock(player, Hand.MAIN_HAND, new BlockHitResult(Vec3d.ofCenter(support).add(0.0, 0.5, 0.0), Direction.UP, support, false));
                player.swingHand(Hand.MAIN_HAND);
                this.targetChest = placePos;
                this.currentState = SpawnerProtectModule.State.GOING_TO_CHEST;
@@ -612,7 +600,8 @@ public final class SpawnerProtectModule extends ClientModule {
       this.updateSneak(false);
       this.lagWaitTicks++;
       if (this.lagWaitTicks > 40) {
-         if (mc.getNetworkHandler() != null) {
+         if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection().isOpen()) {
+            AutoReconnectModule.holdOff();
             mc.getNetworkHandler().getConnection().disconnect(Text.literal("[SpawnerProtect] Görev tamamlandı, güvenli çıkış yapıldı."));
          }
 

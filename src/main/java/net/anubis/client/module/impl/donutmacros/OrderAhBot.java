@@ -40,6 +40,10 @@ final class OrderAhBot {
       return this.ah.inventoryCapReached(this.product);
    }
 
+   long sellPrice() {
+      return this.stock.price;
+   }
+
    void run() {
       this.say(ModuleChat.body().text("Selling ").name(this.product.describe()).text(this.product.restock() ? ", restocking with orders." : "."));
 

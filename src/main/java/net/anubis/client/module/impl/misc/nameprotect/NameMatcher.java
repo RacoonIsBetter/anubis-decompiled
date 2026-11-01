@@ -189,7 +189,8 @@ public final class NameMatcher {
 
                String alias = this.aliasAt(text, i, wordEnd);
                if (alias != null) {
-                  found = add(found, i, wordEnd, alias);
+                  int from = bedrockPrefix(text, i);
+                  found = add(found, from, wordEnd, from == i ? alias : text.substring(from, i).replace(".", "") + alias);
                } else if (segmentEnd < wordEnd) {
                   for (int part = segment + 1; part < segmentCount && segmentStarts[part] < wordEnd; part++) {
                      int from = segmentStarts[part];
@@ -208,6 +209,28 @@ public final class NameMatcher {
          return found != null ? found : List.of();
       } else {
          return List.of();
+      }
+   }
+
+   private static int bedrockPrefix(String text, int start) {
+      int at = start;
+      int from = start;
+
+      while (true) {
+         while (at >= 2 && text.charAt(at - 2) == 167) {
+            at -= 2;
+         }
+
+         if (at < 1 || text.charAt(at - 1) != '.') {
+            if (from == start) {
+               return start;
+            }
+
+            boolean glued = from >= 1 && isNameChar(text.charAt(from - 1)) && (from < 2 || text.charAt(from - 2) != 167);
+            return glued ? start : from;
+         }
+
+         from = --at;
       }
    }
 

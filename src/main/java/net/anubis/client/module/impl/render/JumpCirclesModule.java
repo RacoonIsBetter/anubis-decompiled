@@ -2,7 +2,6 @@ package net.anubis.client.module.impl.render;
 
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.pipeline.RenderPipeline.Snippet;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -19,27 +18,26 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.render.LayeringTransform;
+import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.RenderSetup;
+import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.VertexFormats;
+import net.minecraft.client.render.VertexConsumerProvider.Immediate;
+import net.minecraft.client.render.state.CameraRenderState;
+import net.minecraft.client.texture.MipmapHelper;
+import net.minecraft.client.texture.MipmapStrategy;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.ResourceTexture;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.render.state.CameraRenderState;
-import net.minecraft.client.render.LayeringTransform;
-import net.minecraft.client.render.RenderSetup;
-import net.minecraft.client.texture.MipmapStrategy;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.util.Identifier;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.texture.MipmapHelper;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.client.render.VertexConsumerProvider.Immediate;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Vec3d;
 
 @Environment(EnvType.CLIENT)
 public final class JumpCirclesModule extends ClientModule {
@@ -347,7 +345,7 @@ public final class JumpCirclesModule extends ClientModule {
    }
 
    private static void band(VertexConsumer out, float x, float y, float z, float r0, int c0, float r1, int c1) {
-      int segments = MobilePerformance.segments(64, 32);
+      int segments = 64;
 
       for (int i = 0; i < segments; i++) {
          int from = i * 64 / segments;
@@ -399,7 +397,7 @@ public final class JumpCirclesModule extends ClientModule {
 
    @Environment(EnvType.CLIENT)
    private static final class Logo {
-      static final RenderPipeline PIPELINE = RenderPipeline.builder(new Snippet[]{RenderPipelines.TRANSFORMS_AND_PROJECTION_SNIPPET})
+      static final RenderPipeline PIPELINE = RenderPipeline.builder(RenderPipelines.TRANSFORMS_AND_PROJECTION_SNIPPET)
          .withLocation(Identifier.of("anubis", "pipeline/jump_circle_logo"))
          .withVertexShader("core/position_tex_color")
          .withFragmentShader("core/position_tex_color")
@@ -415,11 +413,16 @@ public final class JumpCirclesModule extends ClientModule {
       );
       static final RenderLayer GLOW_TYPE = RenderLayer.of(
          "anubis_jump_circle_logo_glow",
-         RenderSetup.builder(PIPELINE).texture("Sampler0", JumpCirclesModule.LOGO_GLOW_TEXTURE).layeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING).build()
+         RenderSetup.builder(PIPELINE)
+            .texture("Sampler0", JumpCirclesModule.LOGO_GLOW_TEXTURE)
+            .layeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
+            .build()
       );
 
       static {
-         MinecraftClient.getInstance().getTextureManager().registerTexture(JumpCirclesModule.LOGO_TEXTURE, new JumpCirclesModule.LogoTexture(JumpCirclesModule.LOGO_TEXTURE));
+         MinecraftClient.getInstance()
+            .getTextureManager()
+            .registerTexture(JumpCirclesModule.LOGO_TEXTURE, new JumpCirclesModule.LogoTexture(JumpCirclesModule.LOGO_TEXTURE));
          MinecraftClient.getInstance()
             .getTextureManager()
             .registerTexture(JumpCirclesModule.LOGO_GLOW_TEXTURE, new JumpCirclesModule.LogoTexture(JumpCirclesModule.LOGO_GLOW_TEXTURE));
@@ -432,6 +435,7 @@ public final class JumpCirclesModule extends ClientModule {
          super(id);
       }
 
+      @Override
       protected void load(NativeImage image) {
          int levels = 32 - Integer.numberOfLeadingZeros(Math.min(image.getWidth(), image.getHeight()));
          NativeImage[] mips = MipmapHelper.getMipmapLevelsImages(this.getId(), new NativeImage[]{image}, levels - 1, MipmapStrategy.MEAN, 0.0F);

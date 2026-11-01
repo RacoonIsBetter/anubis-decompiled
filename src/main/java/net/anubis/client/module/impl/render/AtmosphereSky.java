@@ -3,10 +3,10 @@ package net.anubis.client.module.impl.render;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.random.Random;
 import net.minecraft.util.math.ColorHelper;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.random.Random;
 
 @Environment(EnvType.CLIENT)
 final class AtmosphereSky {
@@ -29,10 +29,18 @@ final class AtmosphereSky {
    private final SkyMesh halo = new SkyMesh("Anubis sun and moon glow", SkyMesh.GLOW, 256);
    private final SkyMesh meteorMesh = new SkyMesh("Anubis shooting stars", SkyMesh.GLOW, 12);
    private final Random random = Random.create();
+   private static final float DOME_SUN_STEP = 0.002F;
+   private static final float DOME_STRENGTH_STEP = 0.004F;
    private int zenith;
    private int horizon;
    private int glow;
    private float glowStrength;
+   private int builtZenith;
+   private int builtHorizon;
+   private int builtGlow;
+   private float builtStrength;
+   private float builtSunX = Float.NaN;
+   private float builtSunY = Float.NaN;
    private float sunX;
    private float sunY;
    private float sunAngle;
@@ -103,10 +111,28 @@ final class AtmosphereSky {
    }
 
    void renderDome(MatrixStack pose) {
-      BufferBuilder builder = this.dome.begin();
-      this.domeQuads(builder, false);
-      this.dome.upload(builder);
+      if (!this.dome.isBuilt() || this.domeStale()) {
+         BufferBuilder builder = this.dome.begin();
+         this.domeQuads(builder, false);
+         this.dome.upload(builder);
+         this.builtZenith = this.zenith;
+         this.builtHorizon = this.horizon;
+         this.builtGlow = this.glow;
+         this.builtStrength = this.glowStrength;
+         this.builtSunX = this.sunX;
+         this.builtSunY = this.sunY;
+      }
+
       this.dome.draw(pose, 1.0F);
+   }
+
+   private boolean domeStale() {
+      return this.zenith != this.builtZenith
+         || this.horizon != this.builtHorizon
+         || this.glow != this.builtGlow
+         || Math.abs(this.glowStrength - this.builtStrength) > 0.004F
+         || Math.abs(this.sunX - this.builtSunX) > 0.002F
+         || Math.abs(this.sunY - this.builtSunY) > 0.002F;
    }
 
    void renderEndDome(MatrixStack pose) {

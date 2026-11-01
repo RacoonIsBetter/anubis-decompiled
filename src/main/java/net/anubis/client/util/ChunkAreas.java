@@ -26,11 +26,7 @@ public final class ChunkAreas {
          this.find(chunks);
 
          for (int i = 0; i < this.areaX.size(); i++) {
-            if (MobilePerformance.active()) {
-               TracerEngine.draw(this.areaX.getDouble(i), y, this.areaZ.getDouble(i), color);
-            } else {
-               TracerEngine.draw(new Vec3d(this.areaX.getDouble(i), y, this.areaZ.getDouble(i)), color);
-            }
+            TracerEngine.draw(new Vec3d(this.areaX.getDouble(i), y, this.areaZ.getDouble(i)), color);
          }
       }
    }

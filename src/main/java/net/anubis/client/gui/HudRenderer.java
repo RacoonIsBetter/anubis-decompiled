@@ -48,25 +48,25 @@ import net.anubis.client.util.spotify.SpotifyWindow;
 import net.anubis.client.util.spotify.SyncedLyrics;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.util.Window;
-import net.minecraft.client.util.DefaultSkinHelper;
-import net.minecraft.client.resource.language.I18n;
-import net.minecraft.client.texture.GlTexture;
-import net.minecraft.entity.effect.StatusEffect;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.world.World;
-import net.minecraft.util.Identifier;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.toast.Toast;
 import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.network.ServerInfo;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.resource.language.I18n;
+import net.minecraft.client.texture.GlTexture;
+import net.minecraft.client.toast.Toast;
 import net.minecraft.client.toast.Toast.Visibility;
+import net.minecraft.client.util.DefaultSkinHelper;
+import net.minecraft.client.util.Window;
+import net.minecraft.entity.effect.StatusEffect;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.world.World;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.system.MemoryUtil;
 
@@ -117,6 +117,8 @@ public final class HudRenderer {
    private Float snapGuideX;
    private Float snapGuideY;
    private static int studioFrame = -2;
+   private static volatile float[] infoBarBox;
+   private static volatile long infoBarDrawnAt;
    private static final float HIDDEN_ALPHA = 0.35F;
    private long infoSecond = Long.MIN_VALUE;
    private int infoFps = -1;
@@ -317,6 +319,10 @@ public final class HudRenderer {
       return INSTANCE;
    }
 
+   public static float[] infoBarBox() {
+      return System.nanoTime() - infoBarDrawnAt < 250000000L ? infoBarBox : null;
+   }
+
    static void markStudioPreview() {
       studioFrame = ImGuiManager.getInstance().frameCount();
    }
@@ -485,6 +491,11 @@ public final class HudRenderer {
                   boolean hotkeysShown = hudOn && hotkeys.visible && HotkeysModule.shouldShowHud() && !gameHidden;
                   if (infoBarShown && !infoPlan.segments().isEmpty() || editMode) {
                      this.drawInfoBar(dl, infoBar, infoPlan, shadow, this.transform(infoBar, editMode, infoBarShown));
+                  }
+
+                  if (infoBarShown && !infoPlan.segments().isEmpty() && !editMode) {
+                     infoBarBox = new float[]{infoBar.x, infoBar.y, infoBar.x + infoBar.width, infoBar.y + infoBar.height};
+                     infoBarDrawnAt = System.nanoTime();
                   }
 
                   if (coordsShown && !coordsPlan.rows().isEmpty() || editMode) {
@@ -1353,7 +1364,7 @@ public final class HudRenderer {
                if (texture != null) {
                   dl.addImage(texture.id(), ix, iy, ix + icon, iy + icon, 0.0F, 0.0F, 1.0F, 1.0F, HudChrome.scaleAlpha(-1, iconAlpha));
                } else {
-                  int color = GuiPalette.abgr(0xFF000000 | ((StatusEffect)row.effect().value()).getColor());
+                  int color = GuiPalette.abgr(0xFF000000 | row.effect().value().getColor());
                   dl.addCircleFilled(ix + icon * 0.5F, iy + icon * 0.5F, icon * 0.3F, HudChrome.scaleAlpha(color, iconAlpha), 16);
                }
 
@@ -2057,7 +2068,7 @@ public final class HudRenderer {
             idle = true;
             break;
          case UNSUPPORTED:
-            title = "Spotify · Windows only";
+            title = "Spotify · not supported here";
             idle = true;
             break;
          default:
@@ -3433,7 +3444,7 @@ public final class HudRenderer {
 
       for (StatusEffectInstance instance : client.player.getStatusEffects()) {
          RegistryEntry<StatusEffect> effect = instance.getEffectType();
-         String name = I18n.translate(((StatusEffect)effect.value()).getTranslationKey(), new Object[0]);
+         String name = I18n.translate(effect.value().getTranslationKey());
          int amp = instance.getAmplifier();
          String amplifier = amp > 0 ? toRomanNumeral(amp + 1) : "";
          int ticks = instance.getDuration();
@@ -3883,7 +3894,9 @@ public final class HudRenderer {
    }
 
    @Environment(EnvType.CLIENT)
-   private record PotionRow(RegistryEntry<StatusEffect> effect, String name, String amplifier, String duration, boolean infinite, boolean expiringSoon, int ticks) {
+   private record PotionRow(
+      RegistryEntry<StatusEffect> effect, String name, String amplifier, String duration, boolean infinite, boolean expiringSoon, int ticks
+   ) {
    }
 
    @Environment(EnvType.CLIENT)

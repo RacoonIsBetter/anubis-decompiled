@@ -9,6 +9,8 @@ import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.impl.combat.anchor.AnchorGuard;
 import net.anubis.client.module.impl.combat.crystal.CrystalDamage;
 import net.anubis.client.module.impl.combat.crystal.Crystals;
+import net.anubis.client.module.impl.combat.crystal.LootGuard;
+import net.anubis.client.module.impl.combat.crystal.LootLatch;
 import net.anubis.client.module.impl.combat.melee.MeleeAttacks;
 import net.anubis.client.module.impl.misc.AutoEatModule;
 import net.anubis.client.module.setting.BooleanSetting;
@@ -19,27 +21,28 @@ import net.anubis.client.util.pvp.RotationUtils;
 import net.anubis.client.util.pvp.ServerRotation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.RespawnAnchorBlock;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.world.World;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.Block;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.block.RespawnAnchorBlock;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.util.hit.HitResult.Type;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 
 @Environment(EnvType.CLIENT)
 public final class SingleAnchorMacroModule extends ClientModule {
@@ -56,6 +59,7 @@ public final class SingleAnchorMacroModule extends ClientModule {
    private final BooleanSetting blastGuard = this.addSetting("safe-anchor", new BooleanSetting("Safe Anchor", true));
    private final ModeSetting withoutGuard = this.addSetting("without-guard", new ModeSetting("If Unguarded", "Detonate", "Detonate", "Cancel"));
    private final BooleanSetting switchBack = this.addSetting("switch-back", new BooleanSetting("Switch Back", false));
+   private final BooleanSetting protectLoot = this.addSetting("protect-loot", new BooleanSetting("Protect Loot", true));
    private SingleAnchorMacroModule.Step step = SingleAnchorMacroModule.Step.IDLE;
    private int tick;
    private int readyAt;
@@ -65,6 +69,7 @@ public final class SingleAnchorMacroModule extends ClientModule {
    private boolean refilled;
    private BlockPos anchorPos;
    private Vec3d sightline;
+   private BlockHitResult replaceHit;
    private ClientWorld activeLevel;
    private AnchorGuard.Spot guard;
    private Block guardBlock;
@@ -100,6 +105,8 @@ public final class SingleAnchorMacroModule extends ClientModule {
       MinecraftClient mc = MinecraftClient.getInstance();
       ClientPlayerEntity player = mc.player;
       if (player != null && mc.world != null && mc.interactionManager != null && !player.isDead()) {
+         LootLatch.update(mc, player);
+         LootGuard.update(mc.world, player);
          PlayerInventory inventory = player.getInventory();
          if (mc.currentScreen != null) {
             if (this.step != SingleAnchorMacroModule.Step.IDLE && this.step != SingleAnchorMacroModule.Step.SWITCH_BACK) {
@@ -110,7 +117,17 @@ public final class SingleAnchorMacroModule extends ClientModule {
                this.stop();
             }
 
-            if (this.step != SingleAnchorMacroModule.Step.IDLE || this.tryStart(mc, player)) {
+            if ((LootLatch.latched() || LootLatch.killedNow())
+               && this.step != SingleAnchorMacroModule.Step.IDLE
+               && this.step != SingleAnchorMacroModule.Step.SWITCH_BACK) {
+               this.wrapUp(inventory);
+            }
+
+            if (LootLatch.latched() && this.step == SingleAnchorMacroModule.Step.IDLE) {
+               if (!player.isUsingItem() && anchorInPlay(mc, player)) {
+                  suppressUse(mc);
+               }
+            } else if (this.step != SingleAnchorMacroModule.Step.IDLE || this.tryStart(mc, player)) {
                swallowClicks(mc);
                if (this.step == SingleAnchorMacroModule.Step.SWITCH_BACK) {
                   if (!MeleeAttacks.actedThisTick(player)) {
@@ -188,41 +205,45 @@ public final class SingleAnchorMacroModule extends ClientModule {
                   target = Crystals.placedObsidian(level, player, hit, clicked);
                }
 
-               if (target != null && level.getRegistryKey() != World.NETHER) {
-                  PlayerInventory inventory = player.getInventory();
-                  boolean charged = chargeOf(clicked) > 0;
-                  if (!charged && findHotbar(inventory, Items.GLOWSTONE) == -1) {
-                     return false;
-                  }
-
-                  if (AnchorGuard.detonatorSlot(inventory) == -1) {
-                     return false;
-                  }
-
-                  if (this.blastGuard.get() && this.withoutGuard.is("Cancel") && guardSlot(inventory, this.glowstoneNeeded(charged)) == -1) {
-                     return false;
-                  }
-
-                  if (!CombatMacroLock.tryAcquire(this)) {
-                     return false;
-                  }
-
-                  this.previousSlot = inventory.getSelectedSlot();
-                  this.activeLevel = level;
-                  this.anchorPos = target;
-                  this.sightline = hit.getPos();
-                  SingleAnchorMacroModule.Step first = this.blastGuard.get() ? SingleAnchorMacroModule.Step.GUARD : SingleAnchorMacroModule.Step.CHARGE;
-                  if (onAnchor) {
-                     this.scheduleNow(first);
-                  } else {
-                     AnchorGuard.click(mc, player, hit);
-                     this.schedule(first);
-                  }
-
-                  return true;
-               } else {
+               if (target == null || level.getRegistryKey() == World.NETHER) {
                   return false;
                }
+
+               if (this.protectLoot.get() && LootGuard.near(Vec3d.ofCenter(target))) {
+                  return false;
+               }
+
+               PlayerInventory inventory = player.getInventory();
+               boolean charged = chargeOf(clicked) > 0;
+               if (!charged && findHotbar(inventory, Items.GLOWSTONE) == -1) {
+                  return false;
+               }
+
+               if (AnchorGuard.detonatorSlot(inventory) == -1) {
+                  return false;
+               }
+
+               if (this.blastGuard.get() && this.withoutGuard.is("Cancel") && guardSlot(inventory, this.glowstoneNeeded(charged)) == -1) {
+                  return false;
+               }
+
+               if (!CombatMacroLock.tryAcquire(this)) {
+                  return false;
+               }
+
+               this.previousSlot = inventory.getSelectedSlot();
+               this.activeLevel = level;
+               this.anchorPos = target;
+               this.sightline = hit.getPos();
+               SingleAnchorMacroModule.Step first = this.blastGuard.get() ? SingleAnchorMacroModule.Step.GUARD : SingleAnchorMacroModule.Step.CHARGE;
+               if (onAnchor) {
+                  this.scheduleNow(first);
+               } else {
+                  AnchorGuard.click(mc, player, hit);
+                  this.schedule(first);
+               }
+
+               return true;
             } else {
                return false;
             }
@@ -236,6 +257,19 @@ public final class SingleAnchorMacroModule extends ClientModule {
 
    private static void swallowClicks(MinecraftClient mc) {
       MeleeAttacks.takeAttackClicks(mc);
+      suppressUse(mc);
+   }
+
+   private static boolean anchorInPlay(MinecraftClient mc, ClientPlayerEntity player) {
+      ItemStack main = player.getMainHandStack();
+      return !main.isOf(Items.RESPAWN_ANCHOR) && !main.isOf(Items.GLOWSTONE)
+         ? mc.crosshairTarget instanceof BlockHitResult hit
+            && hit.getType() == Type.BLOCK
+            && mc.world.getBlockState(hit.getBlockPos()).isOf(Blocks.RESPAWN_ANCHOR)
+         : true;
+   }
+
+   private static void suppressUse(MinecraftClient mc) {
       KeyBinding use = mc.options.useKey;
       use.setPressed(false);
 
@@ -256,6 +290,9 @@ public final class SingleAnchorMacroModule extends ClientModule {
             break;
          case DETONATE:
             this.detonate(mc, player);
+            break;
+         case REPLACE:
+            this.replace(mc, player);
       }
    }
 
@@ -381,14 +418,29 @@ public final class SingleAnchorMacroModule extends ClientModule {
                this.select(inventory, slot);
                AnchorGuard.click(mc, player, hit);
                if (slot == refillSlot) {
-                  AnchorGuard.click(mc, player, hit);
                   this.refilled = true;
-                  this.schedule(SingleAnchorMacroModule.Step.CHARGE);
+                  this.replaceHit = hit;
+                  this.schedule(SingleAnchorMacroModule.Step.REPLACE);
                } else {
                   this.wrapUp(inventory);
                }
             }
          }
+      } else {
+         this.wrapUp(inventory);
+      }
+   }
+
+   private void replace(MinecraftClient mc, ClientPlayerEntity player) {
+      PlayerInventory inventory = player.getInventory();
+      Rotation sent = ServerRotation.sent();
+      Vec3d eye = player.getEyePos();
+      boolean stillAimed = sent != null
+         && new Box(this.anchorPos).raycast(eye, eye.add(Vec3d.fromPolar(sent.pitch(), sent.yaw()).multiply(player.getBlockInteractionRange()))).isPresent();
+      if (this.replaceHit != null && stillAimed && player.getMainHandStack().isOf(Items.RESPAWN_ANCHOR) && canClick(player)) {
+         AnchorGuard.click(mc, player, this.replaceHit);
+         this.replaceHit = null;
+         this.schedule(SingleAnchorMacroModule.Step.CHARGE);
       } else {
          this.wrapUp(inventory);
       }
@@ -427,6 +479,7 @@ public final class SingleAnchorMacroModule extends ClientModule {
       this.step = SingleAnchorMacroModule.Step.IDLE;
       this.anchorPos = null;
       this.sightline = null;
+      this.replaceHit = null;
       this.activeLevel = null;
       this.previousSlot = -1;
       this.ownSlot = -1;
@@ -462,7 +515,7 @@ public final class SingleAnchorMacroModule extends ClientModule {
    }
 
    private static int chargeOf(BlockState state) {
-      return state.isOf(Blocks.RESPAWN_ANCHOR) ? (Integer)state.get(RespawnAnchorBlock.CHARGES) : 0;
+      return state.isOf(Blocks.RESPAWN_ANCHOR) ? state.get(RespawnAnchorBlock.CHARGES) : 0;
    }
 
    private int glowstoneNeeded(boolean charged) {
@@ -524,6 +577,7 @@ public final class SingleAnchorMacroModule extends ClientModule {
       AWAIT_GUARD,
       CHARGE,
       DETONATE,
+      REPLACE,
       SWITCH_BACK;
    }
 }

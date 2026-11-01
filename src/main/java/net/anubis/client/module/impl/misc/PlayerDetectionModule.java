@@ -24,22 +24,23 @@ import net.anubis.client.module.ModuleRegistry;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.StringSetting;
+import net.anubis.client.security.PayGuard;
 import net.anubis.client.webhook.WebhookConfig;
 import net.anubis.client.webhook.WebhookEmbed;
 import net.anubis.client.webhook.WebhookPayloadBuilder;
 import net.anubis.client.webhook.WebhookService;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.ServerInfo;
+import net.minecraft.client.toast.SystemToast;
+import net.minecraft.client.toast.SystemToast.Type;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.ClientConnection;
 import net.minecraft.text.Text;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.toast.SystemToast;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.toast.SystemToast.Type;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -224,7 +225,7 @@ public final class PlayerDetectionModule extends ClientModule {
 
             for (ClientModule module : ModuleRegistry.all()) {
                if (module.id().equalsIgnoreCase(key) || module.name().equalsIgnoreCase(key)) {
-                  if (module != this) {
+                  if (module != this && module.inConfigs()) {
                      resolved.add(module);
                   }
                   break;
@@ -270,6 +271,7 @@ public final class PlayerDetectionModule extends ClientModule {
                mc.inGameHud.getChatHud().addToMessageHistory(command);
             }
 
+            PayGuard.allow(command);
             connection.sendChatCommand(command.substring(1));
             ModuleChat.send(this, ModuleChat.body().text("Panic pay ").good("sent").text(": ").value(amount).text(" to ").name(target));
          }
@@ -364,7 +366,8 @@ public final class PlayerDetectionModule extends ClientModule {
 
    private void disconnectFromServer(MinecraftClient mc, ClientConnection session, Set<String> players) {
       ClientPlayNetworkHandler listener = mc.getNetworkHandler();
-      if (mc.world != null && listener != null && listener.getConnection() == session) {
+      if (mc.world != null && listener != null && listener.getConnection() == session && session.isOpen()) {
+         AutoReconnectModule.holdOff();
          session.disconnect(Text.literal("Player(s) detected: " + String.join(", ", players)));
          ModuleChat.send(
             this,

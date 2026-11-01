@@ -14,7 +14,7 @@ public final class TridentUtilModule extends ClientModule {
    private final BooleanSetting noWater = this.addSetting("no-water", new BooleanSetting("No Water", true));
 
    public TridentUtilModule() {
-      super("trident-util", "Trident Util", "Use tridents out of water and charge them faster.", ModuleCategory.DONUT);
+      super("trident-util", "Trident Util", "Use tridents out of water and charge them faster.", ModuleCategory.MOVEMENT);
    }
 
    private static TridentUtilModule active() {

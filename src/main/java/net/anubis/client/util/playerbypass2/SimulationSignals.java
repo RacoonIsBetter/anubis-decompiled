@@ -11,58 +11,61 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap.Entry;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import java.util.ArrayDeque;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.network.packet.s2c.play.EntityPositionSyncS2CPacket;
-import net.minecraft.entity.LazyEntityReference;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.Oxidizable;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
-import net.minecraft.entity.SpawnGroup;
-import net.minecraft.entity.mob.PathAwareEntity;
 import net.minecraft.entity.FallingBlockEntity;
 import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.mob.ShulkerEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.World;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
-import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
-import net.minecraft.block.BlockState;
-import net.minecraft.network.packet.s2c.play.EntityS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntitySetHeadYawS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.ItemPickupAnimationS2CPacket;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.registry.RegistryKey;
+import net.minecraft.entity.LazyEntityReference;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.SpawnGroup;
 import net.minecraft.entity.Tameable;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.registry.Registries;
 import net.minecraft.entity.damage.DamageType;
 import net.minecraft.entity.damage.DamageTypes;
+import net.minecraft.entity.mob.PathAwareEntity;
+import net.minecraft.entity.mob.ShulkerEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntityPositionSyncS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntityS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntitySetHeadYawS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.ItemPickupAnimationS2CPacket;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.state.property.Properties;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.World;
 
 @Environment(EnvType.CLIENT)
 public final class SimulationSignals {
-   public static final int MAX_DISTANCE = 64;
    private static final int RECENT = 6;
    private static final long SECOND = 1000000000L;
    private static final long CHUNK_SETTLE = 3000000000L;
    private static final long FRESH_ENTITY = 2000000000L;
    private static final long WANDER_MEMORY = 60000000000L;
-   private static final long CALIBRATION_MEMORY = 30000000000L;
    private static final long TELEPORT_QUIET = 2000000000L;
    private static final long LIGHTNING_LIFE = 3000000000L;
    private static final long UNDERGROUND_HOLD = 3000000000L;
@@ -70,13 +73,30 @@ public final class SimulationSignals {
    private static final int MAX_PINS = 32;
    private static final double MIN_MOVE_SQR = 1.0E-4;
    private static final double TELEPORT_JUMP_SQR = 64.0;
-   private static final double SAMPLE_JUMP_SQR = 256.0;
+   private static final double SAMPLE_JUMP_SQR = 900.0;
    private static final double TRACKING_INSET = 24.0;
    private static final double TRACKED_DECAY = 0.5;
    private static final float FORGET_SCORE = 0.05F;
-   private static final float SOURCE_CAP = 4.0F;
+   private static final float WEAK_CAP = 4.0F;
+   private static final float STRONG_CAP = 10.0F;
    private static final int MIN_Y = 0;
    private static final int BLOCK_SPILL = 1;
+   private static final Set<Block> GROWS_FROM_AIR = Set.of(
+      Blocks.SUGAR_CANE,
+      Blocks.CACTUS,
+      Blocks.BAMBOO,
+      Blocks.BAMBOO_SAPLING,
+      Blocks.MELON,
+      Blocks.PUMPKIN,
+      Blocks.SNOW,
+      Blocks.FIRE,
+      Blocks.SOUL_FIRE,
+      Blocks.BROWN_MUSHROOM,
+      Blocks.RED_MUSHROOM,
+      Blocks.CHORUS_PLANT,
+      Blocks.CHORUS_FLOWER
+   );
+   private static final Set<Block> GONE_TO_AIR = Set.of(Blocks.SNOW, Blocks.FIRE, Blocks.SOUL_FIRE, Blocks.TURTLE_EGG, Blocks.SNIFFER_EGG, Blocks.FROGSPAWN);
    private static boolean active;
    private static int serverSim = -1;
    private static int serverView = -1;
@@ -110,8 +130,6 @@ public final class SimulationSignals {
    private static final Int2LongOpenHashMap LAST_ACTIVE = new Int2LongOpenHashMap();
    private static final LongOpenHashSet FROZEN = new LongOpenHashSet();
    private static final ArrayDeque<SimulationSignals.Pin> PINS = new ArrayDeque<>();
-   private static final float[] MOVES_BY_DISTANCE = new float[65];
-   private static long movesUpdated;
 
    private SimulationSignals() {
    }
@@ -148,7 +166,6 @@ public final class SimulationSignals {
       LAST_ACTIVE.clear();
       FROZEN.clear();
       PINS.clear();
-      Arrays.fill(MOVES_BY_DISTANCE, 0.0F);
       hasLast = false;
       hasSample = false;
       passedCenter = Long.MIN_VALUE;
@@ -157,10 +174,6 @@ public final class SimulationSignals {
 
    public static int session() {
       return session;
-   }
-
-   public static int serverSimulation() {
-      return serverSim;
    }
 
    public static int serverView() {
@@ -208,40 +221,6 @@ public final class SimulationSignals {
 
    static float decay(long elapsed) {
       return (float)Math.exp(-elapsed / memoryNanos);
-   }
-
-   public static float[] movesByDistance() {
-      float fade = (float)Math.exp(-(now() - movesUpdated) / 3.0E10);
-      float[] out = new float[MOVES_BY_DISTANCE.length];
-
-      for (int i = 0; i < out.length; i++) {
-         out[i] = MOVES_BY_DISTANCE[i] * fade;
-      }
-
-      return out;
-   }
-
-   public static int measuredSimulation() {
-      float[] moves = movesByDistance();
-      float total = 0.0F;
-
-      for (float m : moves) {
-         total += m;
-      }
-
-      if (total < 20.0F) {
-         return -1;
-      }
-
-      int farthest = -1;
-
-      for (int d = 0; d < moves.length; d++) {
-         if (moves[d] >= 1.5F) {
-            farthest = d;
-         }
-      }
-
-      return farthest;
    }
 
    public static void onLogin(int simulationDistance, int chunkRadius, RegistryKey<World> level) {
@@ -308,7 +287,7 @@ public final class SimulationSignals {
          ClientWorld level = MinecraftClient.getInstance().world;
          if (level != null) {
             Entity entity = level.getEntityById(packet.id());
-            if (entity != null) {
+            if (entity instanceof LivingEntity) {
                if (!(entity.getEntityPos().squaredDistanceTo(packet.values().position()) < 1.0E-4)) {
                   LAST_ACTIVE.put(entity.getId(), now());
                   entitySignal(entity, SimulationSignals.Kind.MOVE, 0);
@@ -409,9 +388,7 @@ public final class SimulationSignals {
                if (item != null) {
                   Entity taker = level.getEntityById(collector);
                   if (taker == null) {
-                     String what = item instanceof ItemEntity stack
-                        ? Registries.ITEM.getId(stack.getStack().getItem()).getPath()
-                        : name(item.getType());
+                     String what = item instanceof ItemEntity stack ? Registries.ITEM.getId(stack.getStack().getItem()).getPath() : name(item.getType());
                      pin(item.getBlockPos(), "Hidden Pickup " + what);
                   } else if (!(taker instanceof PlayerEntity)) {
                      LAST_ACTIVE.put(taker.getId(), now());
@@ -494,10 +471,55 @@ public final class SimulationSignals {
          if (previous != state) {
             if (!ignored(previous) && !ignored(state)) {
                if (settled(pos)) {
-                  signal(pos, SimulationSignals.Kind.BLOCK, 1, () -> blockShare(pos), () -> describe(previous) + " -> " + describe(state));
+                  SimulationSignals.Kind kind = ticked(previous, state) ? SimulationSignals.Kind.TICK : SimulationSignals.Kind.BLOCK;
+                  signal(pos, kind, 1, () -> blockShare(pos), () -> describe(previous) + " -> " + describe(state));
                }
             }
          }
+      }
+   }
+
+   static boolean ticked(BlockState previous, BlockState state) {
+      Block from = previous.getBlock();
+      Block to = state.getBlock();
+      if (from == to) {
+         return true;
+      }
+
+      if (!previous.getFluidState().isEmpty() || !state.getFluidState().isEmpty()) {
+         return true;
+      }
+
+      if (previous.isIn(BlockTags.LEAVES) && state.isAir()) {
+         return true;
+      }
+
+      if (previous.isAir() && state.isIn(BlockTags.LEAVES) && !state.get(Properties.PERSISTENT, true)) {
+         return true;
+      }
+
+      if (!previous.isIn(BlockTags.SAPLINGS) || !state.isIn(BlockTags.LOGS) && !state.isIn(BlockTags.LEAVES)) {
+         if (previous.isIn(BlockTags.CROPS) && state.isAir()) {
+            return true;
+         }
+
+         if (from != Blocks.DIRT || to != Blocks.GRASS_BLOCK && to != Blocks.MYCELIUM) {
+            if (from == Blocks.FARMLAND && to == Blocks.DIRT) {
+               return true;
+            } else if (from == Blocks.MELON_STEM && to == Blocks.ATTACHED_MELON_STEM) {
+               return true;
+            } else if (from == Blocks.PUMPKIN_STEM && to == Blocks.ATTACHED_PUMPKIN_STEM) {
+               return true;
+            } else if (previous.isAir() && GROWS_FROM_AIR.contains(to)) {
+               return true;
+            } else {
+               return state.isAir() && GONE_TO_AIR.contains(from) ? true : Oxidizable.getIncreasedOxidationBlock(from).map(next -> next == to).orElse(false);
+            }
+         } else {
+            return true;
+         }
+      } else {
+         return true;
       }
    }
 
@@ -539,7 +561,7 @@ public final class SimulationSignals {
                int pcx = self.getBlockPos().getX() >> 4;
                int pcz = self.getBlockPos().getZ() >> 4;
                int start = ringStart();
-               boolean sample = !isQuiet() && (!hasSample || square(x - sampleX, z - sampleZ) <= 256.0);
+               boolean sample = !isQuiet() && (!hasSample || square(x - sampleX, z - sampleZ) <= 900.0);
                sampleX = x;
                sampleZ = z;
                hasSample = true;
@@ -638,7 +660,7 @@ public final class SimulationSignals {
       int pcx = self.getBlockPos().getX() >> 4;
       int pcz = self.getBlockPos().getZ() >> 4;
       long center = ChunkPos.toLong(pcx, pcz);
-      int radius = ringStart() - 1;
+      int radius = ringStart() - 1 + 1;
       if (center != passedCenter || radius != passedRadius) {
          passedCenter = center;
          passedRadius = radius;
@@ -665,10 +687,6 @@ public final class SimulationSignals {
                      if (owner != null && self.getUuid().equals(owner.getUuid())) {
                         return;
                      }
-                  }
-
-                  if (kind == SimulationSignals.Kind.MOVE) {
-                     calibrate(entity, self);
                   }
 
                   if (now() - ENTITY_INSIDE.getOrDefault(entity.getId(), -4611686018427387904L) >= 60000000000L) {
@@ -710,7 +728,7 @@ public final class SimulationSignals {
                if (!passed.contains(key)) {
                   if (!ignoreVisiblePlayers || !nearVisiblePlayer(cx, cz, self, spill)) {
                      long now = now();
-                     float weight = source.get().take(kind.weight, now);
+                     float weight = source.get().take(kind.weight, kind.cap, now);
                      if (!(weight <= 0.0F)) {
                         String detail = kind.title + " " + what.get() + " @ " + pos.getX() + " " + pos.getY() + " " + pos.getZ();
                         ((SimulationSignals.ChunkSignal)CHUNKS.computeIfAbsent(key, k -> new SimulationSignals.ChunkSignal())).add(kind, now, weight, detail);
@@ -718,25 +736,6 @@ public final class SimulationSignals {
                   }
                }
             }
-         }
-      }
-   }
-
-   private static void calibrate(Entity entity, ClientPlayerEntity self) {
-      int cx = entity.getBlockPos().getX() >> 4;
-      int cz = entity.getBlockPos().getZ() >> 4;
-      int d = distance(cx, cz, self.getBlockPos().getX() >> 4, self.getBlockPos().getZ() >> 4);
-      if (d <= 64) {
-         if (!nearVisiblePlayer(cx, cz, self, 0)) {
-            long now = now();
-            float fade = (float)Math.exp(-(now - movesUpdated) / 3.0E10);
-
-            for (int i = 0; i < MOVES_BY_DISTANCE.length; i++) {
-               MOVES_BY_DISTANCE[i] = MOVES_BY_DISTANCE[i] * fade;
-            }
-
-            movesUpdated = now;
-            MOVES_BY_DISTANCE[d]++;
          }
       }
    }
@@ -836,23 +835,26 @@ public final class SimulationSignals {
 
    @Environment(EnvType.CLIENT)
    public enum Kind {
-      MOVE("Mob Move", 1.0F),
-      HEAD("Head Turn", 0.5F),
-      SPAWN("Spawn / Drop", 2.0F),
-      REMOVE("Despawn / Pickup", 1.5F),
-      STATE("Entity State", 0.5F),
-      EVENT("Entity Event", 1.5F),
-      BLOCK("Block Change", 2.0F),
-      LIGHTNING("Lightning", 4.0F),
-      HURT("Hurt", 1.5F),
-      EQUIP("Equipment", 1.0F);
+      MOVE("Mob Move", 2.5F, true),
+      HEAD("Head Turn", 2.5F, true),
+      SPAWN("Spawn / Drop", 2.0F, false),
+      REMOVE("Despawn / Pickup", 1.5F, false),
+      STATE("Entity State", 0.5F, false),
+      EVENT("Entity Event", 5.0F, true),
+      BLOCK("Block Change", 1.6F, false),
+      TICK("Tick Change", 10.0F, true),
+      LIGHTNING("Lightning", 10.0F, true),
+      HURT("Hurt", 5.0F, true),
+      EQUIP("Equipment", 5.0F, true);
 
       public final String title;
       final float weight;
+      final float cap;
 
-      Kind(String title, float weight) {
+      Kind(String title, float weight, boolean ticked) {
          this.title = title;
          this.weight = weight;
+         this.cap = ticked ? 10.0F : 4.0F;
       }
    }
 
@@ -869,9 +871,9 @@ public final class SimulationSignals {
          return this.amount * SimulationSignals.decay(now - this.updated);
       }
 
-      float take(float weight, long now) {
+      float take(float weight, float cap, long now) {
          float held = this.amount(now);
-         float granted = Math.min(weight, Math.max(4.0F, weight) - held);
+         float granted = Math.min(weight, Math.max(cap, weight) - held);
          if (granted <= 0.0F) {
             return 0.0F;
          }

@@ -8,15 +8,9 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.Long2FloatMap.Entry;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
-import java.util.ArrayList;
-import java.util.List;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.world.debug.gizmo.Gizmo;
-import net.minecraft.world.debug.gizmo.GizmoDrawer;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
 import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.ColorHelper;
 
 @Environment(EnvType.CLIENT)
@@ -36,33 +30,24 @@ public final class ChunkOverlay {
    private final LongOpenHashSet done = new LongOpenHashSet();
    private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
    private final LongArrayList group = new LongArrayList();
-   private final ChunkTileGeometry.Cache mobileTiles = new ChunkTileGeometry.Cache();
    private long lastNanos;
    private long pendingSince;
    private long lastAdded;
+   private static final double[] OUTLINE = new double[40];
+   private static int points;
 
    public void draw(LongSet chunks, int fill, float partialTick) {
-      boolean mobile = MobilePerformance.active();
-      if (mobile) {
-         this.mobileTiles.beginFrame();
-      } else {
-         this.mobileTiles.clear();
-      }
-
       long now = System.nanoTime();
       float dt = this.lastNanos == 0L ? 0.0F : (float)(now - this.lastNanos) / 1.0E9F;
       this.lastNanos = now;
       if (dt > 0.5F) {
          this.shown.clear();
          this.pending.clear();
-         this.mobileTiles.clear();
       }
 
       this.collect(chunks, now);
       this.step(chunks, dt);
-      if (this.shown.isEmpty()) {
-         this.mobileTiles.clear();
-      } else {
+      if (!this.shown.isEmpty()) {
          int edge = ColorHelper.withAlpha(Math.min(255, ColorHelper.getAlpha(fill) * 3 / 2), ColorHelper.scaleRgb(fill, 0.77F));
          FoglessLines lines = FoglessLines.forFrame(partialTick);
          this.done.clear();
@@ -75,6 +60,57 @@ public final class ChunkOverlay {
             }
          }
       }
+   }
+
+   public void drawTiles(LongSet chunks, int fill, int edge, float partialTick) {
+      long now = System.nanoTime();
+      float dt = this.lastNanos == 0L ? 0.0F : (float)(now - this.lastNanos) / 1.0E9F;
+      this.lastNanos = now;
+      if (dt > 0.5F) {
+         this.shown.clear();
+      }
+
+      LongIterator keys = chunks.iterator();
+
+      while (keys.hasNext()) {
+         this.shown.putIfAbsent(keys.nextLong(), 0.0F);
+      }
+
+      this.step(chunks, dt);
+      if (!this.shown.isEmpty()) {
+         FoglessLines lines = FoglessLines.forFrame(partialTick);
+         ObjectIterator<Entry> entries = this.shown.long2FloatEntrySet().fastIterator();
+
+         while (entries.hasNext()) {
+            Entry entry = (Entry)entries.next();
+            float size = easeOut(entry.getFloatValue());
+            if (!(size <= 0.001F)) {
+               long key = entry.getLongKey();
+               int cx = ChunkPos.getPackedX(key);
+               int cz = ChunkPos.getPackedZ(key);
+               if (!this.settled(chunks, key)) {
+                  double half = 8.0 * size;
+                  double mx = (cx << 4) + 8.0;
+                  double mz = (cz << 4) + 8.0;
+                  tile(lines, mx - half, mz - half, mx + half, mz + half, 2.0 * size, true, true, true, true, fade(fill, size), fade(edge, size));
+               } else {
+                  double x0 = cx << 4;
+                  double z0 = cz << 4;
+                  double x1 = x0 + 16.0;
+                  double z1 = z0 + 16.0;
+                  boolean north = !this.settled(chunks, ChunkPos.toLong(cx, cz - 1));
+                  boolean south = !this.settled(chunks, ChunkPos.toLong(cx, cz + 1));
+                  boolean west = !this.settled(chunks, ChunkPos.toLong(cx - 1, cz));
+                  boolean east = !this.settled(chunks, ChunkPos.toLong(cx + 1, cz));
+                  tile(lines, x0, z0, x1, z1, 2.0, north, south, west, east, fill, edge);
+               }
+            }
+         }
+      }
+   }
+
+   private boolean settled(LongSet chunks, long key) {
+      return this.shown.get(key) >= 1.0F && chunks.contains(key);
    }
 
    private void collect(LongSet chunks, long now) {
@@ -171,22 +207,7 @@ public final class ChunkOverlay {
             boolean south = !this.joined(chunks, ChunkPos.toLong(cx, cz + 1), progress, present);
             boolean west = !this.joined(chunks, ChunkPos.toLong(cx - 1, cz), progress, present);
             boolean east = !this.joined(chunks, ChunkPos.toLong(cx + 1, cz), progress, present);
-            if (MobilePerformance.active() && size >= 1.0F) {
-               int mask = (north ? 1 : 0) | (south ? 2 : 0) | (west ? 4 : 0) | (east ? 8 : 0);
-               ChunkTileGeometry geometry = this.mobileTiles.get(key, x0, z0, x1, z1, 2.0 * size, mask);
-
-               for (int edgeIndex = 0; edgeIndex < geometry.curves.length; edgeIndex += 2) {
-                  lines.line(geometry.curves[edgeIndex], geometry.curves[edgeIndex + 1], groupEdge, 1.5F);
-               }
-
-               GizmoDrawing.collect(new ChunkOverlay.Plane(geometry.outline, groupFill)).ignoreOcclusion();
-
-               for (int edgeIndex = 0; edgeIndex < geometry.edges.length; edgeIndex += 2) {
-                  lines.line(geometry.edges[edgeIndex], geometry.edges[edgeIndex + 1], groupEdge, 1.5F);
-               }
-            } else {
-               tile(lines, x0, z0, x1, z1, 2.0 * size, north, south, west, east, groupFill, groupEdge);
-            }
+            tile(lines, x0, z0, x1, z1, 2.0 * size, north, south, west, east, groupFill, groupEdge);
          }
       }
    }
@@ -219,12 +240,32 @@ public final class ChunkOverlay {
       double ne = north && east ? radius : 0.0;
       double se = south && east ? radius : 0.0;
       double sw = south && west ? radius : 0.0;
-      List<Vec3d> outline = new ArrayList<>(20);
-      corner(outline, lines, x0 + nw, z0 + nw, nw, 180.0, edge);
-      corner(outline, lines, x1 - ne, z0 + ne, ne, 270.0, edge);
-      corner(outline, lines, x1 - se, z1 - se, se, 0.0, edge);
-      corner(outline, lines, x0 + sw, z1 - sw, sw, 90.0, edge);
-      GizmoDrawing.collect(new ChunkOverlay.Plane(outline.toArray(new Vec3d[0]), fill)).ignoreOcclusion();
+      points = 0;
+      corner(lines, x0 + nw, z0 + nw, nw, 180.0, edge);
+      corner(lines, x1 - ne, z0 + ne, ne, 270.0, edge);
+      corner(lines, x1 - se, z1 - se, se, 0.0, edge);
+      corner(lines, x0 + sw, z1 - sw, sw, 90.0, edge);
+      WorldQuads top = WorldQuads.layer(true);
+      double y = 63.0;
+
+      for (int i = 1; i + 1 < points; i++) {
+         top.quad(
+            OUTLINE[0],
+            y,
+            OUTLINE[1],
+            OUTLINE[i * 2],
+            y,
+            OUTLINE[i * 2 + 1],
+            OUTLINE[i * 2 + 2],
+            y,
+            OUTLINE[i * 2 + 3],
+            OUTLINE[i * 2 + 2],
+            y,
+            OUTLINE[i * 2 + 3],
+            fill
+         );
+      }
+
       if (north) {
          edge(lines, x0 + nw, z0, x1 - ne, z0, edge);
       }
@@ -242,23 +283,32 @@ public final class ChunkOverlay {
       }
    }
 
-   private static void corner(List<Vec3d> outline, FoglessLines lines, double cx, double cz, double radius, double startDegrees, int edge) {
+   private static void corner(FoglessLines lines, double cx, double cz, double radius, double startDegrees, int edge) {
       if (radius <= 0.0) {
-         outline.add(new Vec3d(cx, 63.0, cz));
+         point(cx, cz);
       } else {
-         Vec3d previous = null;
+         double previousX = 0.0;
+         double previousZ = 0.0;
 
          for (int i = 0; i <= 4; i++) {
             double angle = Math.toRadians(startDegrees + 90.0 * i / 4.0);
-            Vec3d point = new Vec3d(cx + Math.cos(angle) * radius, 63.0, cz + Math.sin(angle) * radius);
-            outline.add(point);
-            if (previous != null) {
-               lines.line(previous, point, edge, 1.5F);
+            double x = cx + Math.cos(angle) * radius;
+            double z = cz + Math.sin(angle) * radius;
+            point(x, z);
+            if (i > 0) {
+               lines.line(previousX, 63.0, previousZ, x, 63.0, z, edge, 1.5F);
             }
 
-            previous = point;
+            previousX = x;
+            previousZ = z;
          }
       }
+   }
+
+   private static void point(double x, double z) {
+      OUTLINE[points * 2] = x;
+      OUTLINE[points * 2 + 1] = z;
+      points++;
    }
 
    private static float easeOut(float t) {
@@ -271,13 +321,6 @@ public final class ChunkOverlay {
    }
 
    private static void edge(FoglessLines lines, double ax, double az, double bx, double bz, int color) {
-      lines.line(new Vec3d(ax, 63.0, az), new Vec3d(bx, 63.0, bz), color, 1.5F);
-   }
-
-   @Environment(EnvType.CLIENT)
-   private record Plane(Vec3d[] outline, int color) implements Gizmo {
-      public void draw(GizmoDrawer primitives, float alpha) {
-         primitives.addPolygon(this.outline, ChunkOverlay.fade(this.color, alpha));
-      }
+      lines.line(ax, 63.0, az, bx, 63.0, bz, color, 1.5F);
    }
 }

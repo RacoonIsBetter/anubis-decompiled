@@ -7,15 +7,16 @@ import net.anubis.client.event.impl.Render3DEvent;
 import net.anubis.client.module.impl.render.NoRenderModule;
 import net.anubis.client.util.ShaderOverlay;
 import net.anubis.client.util.TracerEngine;
+import net.anubis.client.util.WorldQuads;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.block.enums.CameraSubmersionType;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.Frustum;
-import net.minecraft.block.enums.CameraSubmersionType;
 import net.minecraft.client.render.WorldRenderer;
-import net.minecraft.world.debug.gizmo.GizmoDrawing.CollectorScope;
 import net.minecraft.client.render.fog.FogRenderer.FogType;
+import net.minecraft.world.debug.gizmo.GizmoDrawing.CollectorScope;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -29,7 +30,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(WorldRenderer.class)
 public abstract class MixinLevelRenderer {
    @ModifyArg(
-      method = "render(Lnet/minecraft/client/util/memory/ObjectAllocator;Lnet/minecraft/client/render/RenderTickCounter;ZLnet/minecraft/client/render/Camera;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lorg/joml/Vector4f;Z)V",
+      method = "render",
       at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/debug/DebugRenderer;render(Lnet/minecraft/client/render/Frustum;DDDF)V"),
       index = 0
    )
@@ -38,31 +39,17 @@ public abstract class MixinLevelRenderer {
    ) {
       float partialTick = MinecraftClient.getInstance().getRenderTickCounter().getTickProgress(false);
       TracerEngine.beginFrame(viewRotation, projection);
-      CollectorScope capture = ShaderOverlay.capture();
+      WorldQuads.beginFrame(MinecraftClient.getInstance().gameRenderer.getCamera().getCameraPos());
 
-      try {
+      try (CollectorScope capture = ShaderOverlay.capture()) {
          Render3DEvent.dispatch(partialTick, frustum);
-      } catch (Throwable var9) {
-         if (capture != null) {
-            try {
-               capture.close();
-            } catch (Throwable var8) {
-               var9.addSuppressed(var8);
-            }
-         }
-
-         throw var9;
-      }
-
-      if (capture != null) {
-         capture.close();
       }
 
       return frustum;
    }
 
    @ModifyArg(
-      method = "render(Lnet/minecraft/client/util/memory/ObjectAllocator;Lnet/minecraft/client/render/RenderTickCounter;ZLnet/minecraft/client/render/Camera;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lorg/joml/Vector4f;Z)V",
+      method = "render",
       at = @At(
          value = "INVOKE",
          target = "Lnet/minecraft/client/render/WorldRenderer;renderLateDebug(Lnet/minecraft/client/render/FrameGraphBuilder;Lnet/minecraft/client/render/state/CameraRenderState;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lorg/joml/Matrix4f;)V"
@@ -80,7 +67,7 @@ public abstract class MixinLevelRenderer {
          : ((AccessorGameRenderer)MinecraftClient.getInstance().gameRenderer).anubis$getFogRenderer().getFogBuffer(FogType.NONE);
    }
 
-   @Inject(method = "render(Lnet/minecraft/client/util/memory/ObjectAllocator;Lnet/minecraft/client/render/RenderTickCounter;ZLnet/minecraft/client/render/Camera;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lorg/joml/Vector4f;Z)V", at = @At("TAIL"))
+   @Inject(method = "render", at = @At("TAIL"))
    private void anubis$overlayAfterShaderPack(
       CallbackInfo ci,
       @Local(argsOnly = true) GpuBufferSlice fog,
@@ -88,19 +75,20 @@ public abstract class MixinLevelRenderer {
       @Local(argsOnly = true, ordinal = 0) Matrix4f viewRotation,
       @Local(argsOnly = true, ordinal = 1) Matrix4f projection
    ) {
+      WorldQuads.render(viewRotation, projection);
       if (ShaderOverlay.pending()) {
          ShaderOverlay.render(camera, viewRotation, projection, fog, anubis$onTopFog(fog, camera));
       }
    }
 
-   @Inject(method = "render(Lnet/minecraft/client/util/memory/ObjectAllocator;Lnet/minecraft/client/render/RenderTickCounter;ZLnet/minecraft/client/render/Camera;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lorg/joml/Vector4f;Z)V", at = @At("TAIL"))
+   @Inject(method = "render", at = @At("TAIL"))
    private void anubis$worldFogForHand(CallbackInfo ci, @Local(argsOnly = true) GpuBufferSlice fog, @Local(argsOnly = true) Camera camera) {
       if (camera.getSubmersionType() != CameraSubmersionType.NONE) {
          RenderSystem.setShaderFog(fog);
       }
    }
 
-   @Inject(method = "hasBlindnessOrDarkness(Lnet/minecraft/client/render/Camera;)Z", at = @At("HEAD"), cancellable = true)
+   @Inject(method = "hasBlindnessOrDarkness", at = @At("HEAD"), cancellable = true)
    private void anubis$keepSkyDuringBlindnessDarkness(Camera camera, CallbackInfoReturnable<Boolean> cir) {
       if (NoRenderModule.hideBlindnessDarkness()) {
          cir.setReturnValue(false);

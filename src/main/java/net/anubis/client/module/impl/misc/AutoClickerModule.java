@@ -8,6 +8,7 @@ import net.anubis.client.input.AnubisKeyPolling;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.CombatMacroLock;
 import net.anubis.client.module.ModuleCategory;
+import net.anubis.client.module.impl.combat.crystal.LootLatch;
 import net.anubis.client.module.impl.combat.melee.MeleeAttacks;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ModeSetting;
@@ -15,11 +16,11 @@ import net.anubis.client.module.setting.NumberSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil.Key;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult.Type;
-import net.minecraft.client.util.InputUtil.Key;
 import org.lwjgl.glfw.GLFW;
 
 @Environment(EnvType.CLIENT)
@@ -48,9 +49,7 @@ public final class AutoClickerModule extends ClientModule {
    private final BooleanSetting onlyWhileHeld = this.addSetting("only-while-held", new BooleanSetting("Only While Held", false));
    private final BooleanSetting breakBlocks = this.addSetting("break-blocks", new BooleanSetting("Break Blocks", true));
    private final AutoClickerModule.Button leftButton = new AutoClickerModule.Button(true, this.left, this.leftMin, this.leftMax, mc -> mc.options.attackKey);
-   private final AutoClickerModule.Button rightButton = new AutoClickerModule.Button(
-      false, this.right, this.rightMin, this.rightMax, mc -> mc.options.useKey
-   );
+   private final AutoClickerModule.Button rightButton = new AutoClickerModule.Button(false, this.right, this.rightMin, this.rightMax, mc -> mc.options.useKey);
 
    public AutoClickerModule() {
       super("auto-clicker", "Auto Clicker", "Clicks the left and/or right mouse button at a randomised, human CPS.", ModuleCategory.MISC);
@@ -85,12 +84,9 @@ public final class AutoClickerModule extends ClientModule {
    @EventHandler
    public void onTick(TickEvent event) {
       MinecraftClient mc = MinecraftClient.getInstance();
-      boolean allowed = MeleeAttacks.canAct(mc)
-         && mc.getOverlay() == null
-         && !CombatMacroLock.heldByOther(this)
-         && !MeleeAttacks.actedThisTick(mc.player);
+      boolean allowed = MeleeAttacks.canAct(mc) && mc.getOverlay() == null && !CombatMacroLock.heldByOther(this) && !MeleeAttacks.actedThisTick(mc.player);
       this.leftButton.tick(mc, allowed);
-      this.rightButton.tick(mc, allowed);
+      this.rightButton.tick(mc, allowed && !LootLatch.active());
    }
 
    private boolean anyClicking() {

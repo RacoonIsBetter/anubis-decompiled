@@ -34,7 +34,6 @@ public final class Miku extends CharacterDesign {
    private static final int SHIRT_LINE = -10788500;
    private static final int BLACK = -13618373;
    private static final int BLACK_SHADE = -14934492;
-   private static final int BLACK_IN = -15592681;
    private static final int BLACK_LINE = -16119026;
    private static final int TEAL = -13645638;
    private static final int TEAL_DARK = -14971002;

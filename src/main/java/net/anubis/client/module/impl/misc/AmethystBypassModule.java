@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import net.anubis.client.event.EventHandler;
 import net.anubis.client.event.Stage;
 import net.anubis.client.event.impl.PacketAppliedEvent;
@@ -12,34 +13,37 @@ import net.anubis.client.event.impl.Render3DEvent;
 import net.anubis.client.event.impl.TickEvent;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
+import net.anubis.client.module.impl.client.PerformanceModule;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
+import net.anubis.client.util.AmethystLight;
 import net.anubis.client.util.GeodeGlowScan;
 import net.anubis.client.util.LevelUtil;
+import net.anubis.client.util.PerformanceBudget;
 import net.anubis.client.util.TracerEngine;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.render.DrawStyle;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.LightType;
-import net.minecraft.block.Blocks;
 import net.minecraft.block.Block;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
 import net.minecraft.block.BlockState;
-import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.block.Blocks;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.DrawStyle;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
+import net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.LightUpdateS2CPacket;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.BlockPos.Mutable;
 import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.PalettedContainer;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.util.math.BlockPos.Mutable;
+import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.world.debug.gizmo.GizmoDrawing;
 
 @Environment(EnvType.CLIENT)
 public final class AmethystBypassModule extends ClientModule {
@@ -49,6 +53,7 @@ public final class AmethystBypassModule extends ClientModule {
    private static final long BUDGET_NANOS = 2000000L;
    private static final String ANBS_SCAN = "ANBS+ Scan";
    private static final int MAX_GLOW_MARKS = 200;
+   private static final int FULL_REFRESH_TICKS = 600;
    private final ModeSetting method = this.addSetting("method", new ModeSetting("Method", "Bypass", "Bypass", "Light", "ANBS+ Scan"));
    private final NumberSetting minCells = this.addSetting("min-cells", new NumberSetting("Min Cells", 12.0F, 1.0F, 100.0F).step(1.0F));
    private final BooleanSetting tracer = this.addSetting("tracer", new BooleanSetting("Tracer", false));
@@ -56,6 +61,11 @@ public final class AmethystBypassModule extends ClientModule {
    private final LongOpenHashSet found = new LongOpenHashSet();
    private final LongOpenHashSet bypassScanned = new LongOpenHashSet();
    private final Long2ObjectOpenHashMap<BlockPos> bypassMarkers = new Long2ObjectOpenHashMap();
+   private final Long2ObjectOpenHashMap<long[]> chunkHits = new Long2ObjectOpenHashMap();
+   private final LongOpenHashSet lightScanned = new LongOpenHashSet();
+   private final LongOpenHashSet chunkFound = new LongOpenHashSet();
+   private boolean hitsChanged;
+   private int sinceRefresh;
    private final GeodeGlowScan glow = new GeodeGlowScan();
    private final LongArrayList glowCells = new LongArrayList();
    private long[] hits = new long[0];
@@ -82,6 +92,10 @@ public final class AmethystBypassModule extends ClientModule {
       this.found.clear();
       this.bypassScanned.clear();
       this.bypassMarkers.clear();
+      this.chunkHits.clear();
+      this.lightScanned.clear();
+      this.hitsChanged = false;
+      this.sinceRefresh = 0;
       this.hits = new long[0];
       this.tick = 0;
    }
@@ -99,7 +113,7 @@ public final class AmethystBypassModule extends ClientModule {
 
             this.tick = 0;
             ChunkPos center = mc.player.getChunkPos();
-            int radius = (Integer)mc.options.getViewDistance().getValue();
+            int radius = mc.options.getViewDistance().getValue();
             if (bypass) {
                this.bypassScanned
                   .removeIf(keyx -> !inRange(keyx, center, radius) || !LevelUtil.isLoaded(level, ChunkPos.getPackedX(keyx), ChunkPos.getPackedZ(keyx)));
@@ -114,11 +128,20 @@ public final class AmethystBypassModule extends ClientModule {
                   }
                }
             } else {
-               this.found.clear();
+               if (++this.sinceRefresh * 20 >= 600) {
+                  this.sinceRefresh = 0;
+                  this.lightScanned.clear();
+               }
+
+               this.hitsChanged = this.hitsChanged
+                  | this.chunkHits
+                     .keySet()
+                     .removeIf(keyx -> !inRange(keyx, center, radius) || !LevelUtil.isLoaded(level, ChunkPos.getPackedX(keyx), ChunkPos.getPackedZ(keyx)));
+               this.lightScanned.removeIf(keyx -> !inRange(keyx, center, radius));
 
                for (int x = center.x - radius; x <= center.x + radius; x++) {
                   for (int z = center.z - radius; z <= center.z + radius; z++) {
-                     if (LevelUtil.isLoaded(level, x, z)) {
+                     if (LevelUtil.isLoaded(level, x, z) && !this.lightScanned.contains(ChunkPos.toLong(x, z))) {
                         this.queue.add(new ChunkPos(x, z));
                      }
                   }
@@ -126,7 +149,9 @@ public final class AmethystBypassModule extends ClientModule {
             }
          }
 
-         long deadline = System.nanoTime() + 2000000L;
+         boolean optimized = PerformanceModule.optimizationsEnabled();
+         long started = System.nanoTime();
+         long deadline = optimized ? PerformanceBudget.acquire(2000000L) : started + 2000000L;
 
          while (!this.queue.isEmpty() && System.nanoTime() < deadline) {
             ChunkPos pos = this.queue.poll();
@@ -135,27 +160,68 @@ public final class AmethystBypassModule extends ClientModule {
                if (bypass) {
                   collectPaletteLeak(chunk, this.bypassMarkers);
                   this.bypassScanned.add(pos.toLong());
-               } else if (this.method.is("ANBS+ Scan")) {
-                  this.collectGlow(level, chunk);
                } else {
-                  collectHiddenBuds(level, chunk, this.found);
+                  this.chunkFound.clear();
+                  if (this.method.is("ANBS+ Scan")) {
+                     this.collectGlow(level, chunk, this.chunkFound);
+                  } else {
+                     AmethystLight.scanSources(level, chunk, (packed, light) -> this.chunkFound.add(packed));
+                  }
+
+                  long key = pos.toLong();
+                  long[] previous = (long[])this.chunkHits.get(key);
+                  long[] now = this.chunkFound.toLongArray();
+                  if (previous != null && now.length < previous.length) {
+                     this.lightScanned.add(key);
+                  } else {
+                     if (now.length == 0) {
+                        if (this.chunkHits.remove(key) != null) {
+                           this.hitsChanged = true;
+                        }
+                     } else if (previous == null || !Arrays.equals(previous, now)) {
+                        this.chunkHits.put(key, now);
+                        this.hitsChanged = true;
+                     }
+
+                     this.lightScanned.add(key);
+                  }
                }
             }
          }
 
-         if (this.queue.isEmpty()) {
-            this.hits = bypass ? markersToLongArray(this.bypassMarkers) : this.found.toLongArray();
+         if (optimized) {
+            PerformanceBudget.record(started);
+         }
+
+         if (bypass) {
+            if (this.queue.isEmpty()) {
+               this.hits = markersToLongArray(this.bypassMarkers);
+            }
+         } else if (this.hitsChanged) {
+            this.hitsChanged = false;
+            this.found.clear();
+            ObjectIterator var22 = this.chunkHits.values().iterator();
+
+            while (var22.hasNext()) {
+               long[] chunkMarks = (long[])var22.next();
+
+               for (long mark : chunkMarks) {
+                  this.found.add(mark);
+               }
+            }
+
+            this.hits = this.found.toLongArray();
          }
       }
    }
 
-   private void collectGlow(ClientWorld level, WorldChunk chunk) {
+   private void collectGlow(ClientWorld level, WorldChunk chunk, LongOpenHashSet out) {
       this.glowCells.clear();
       if (this.glow.scan(level, chunk, this.glowCells::add) >= this.minCells.getInt()) {
          int marks = Math.min(this.glowCells.size(), 200);
 
          for (int i = 0; i < marks; i++) {
-            this.found.add(this.glowCells.getLong(i));
+            out.add(this.glowCells.getLong(i));
          }
       }
    }
@@ -181,13 +247,31 @@ public final class AmethystBypassModule extends ClientModule {
 
    @EventHandler
    public void onPacketApplied(PacketAppliedEvent event) {
-      if (this.method.is("Bypass")) {
+      if (!this.method.is("Bypass")) {
+         if (event.packet instanceof ChunkDataS2CPacket chunk) {
+            this.dirtyAround(chunk.getChunkX(), chunk.getChunkZ());
+         } else if (event.packet instanceof LightUpdateS2CPacket light) {
+            this.dirtyAround(light.getChunkX(), light.getChunkZ());
+         } else if (event.packet instanceof BlockUpdateS2CPacket update) {
+            this.dirtyAround(update.getPos().getX() >> 4, update.getPos().getZ() >> 4);
+         } else if (event.packet instanceof ChunkDeltaUpdateS2CPacket sectionUpdate) {
+            sectionUpdate.visitUpdates((pos, state) -> this.dirtyAround(pos.getX() >> 4, pos.getZ() >> 4));
+         }
+      } else {
          if (event.packet instanceof ChunkDataS2CPacket chunk) {
             this.dirtyBypassChunk(chunk.getChunkX(), chunk.getChunkZ());
          } else if (event.packet instanceof BlockUpdateS2CPacket update) {
             this.dirtyBypassChunk(update.getPos().getX() >> 4, update.getPos().getZ() >> 4);
          } else if (event.packet instanceof ChunkDeltaUpdateS2CPacket sectionUpdate) {
             sectionUpdate.visitUpdates((pos, state) -> this.dirtyBypassChunk(pos.getX() >> 4, pos.getZ() >> 4));
+         }
+      }
+   }
+
+   private void dirtyAround(int chunkX, int chunkZ) {
+      for (int dx = -1; dx <= 1; dx++) {
+         for (int dz = -1; dz <= 1; dz++) {
+            this.lightScanned.remove(ChunkPos.toLong(chunkX + dx, chunkZ + dz));
          }
       }
    }
@@ -269,58 +353,6 @@ public final class AmethystBypassModule extends ClientModule {
       return Math.floorMod(h, 100);
    }
 
-   private static void collectHiddenBuds(ClientWorld level, WorldChunk chunk, LongOpenHashSet out) {
-      ChunkSection[] sections = chunk.getSectionArray();
-      int minSectionY = chunk.getBottomSectionCoord();
-      ChunkPos pos = chunk.getPos();
-      Mutable cursor = new Mutable();
-
-      for (int i = 0; i < sections.length; i++) {
-         ChunkSection section = sections[i];
-         if (section != null && !section.isEmpty() && section.getBlockStateContainer().hasAny(AmethystBypassModule::isGeode)) {
-            int baseY = (minSectionY + i) * 16;
-
-            for (int y = 0; y < 16; y++) {
-               for (int z = 0; z < 16; z++) {
-                  for (int x = 0; x < 16; x++) {
-                     if (section.getBlockState(x, y, z).getLuminance() <= 0) {
-                        cursor.set(pos.getStartX() + x, baseY + y, pos.getStartZ() + z);
-                        int light = level.getLightLevel(LightType.BLOCK, cursor);
-                        if (isBudLight(light) && touchesGeode(level, cursor) && isLocalMaximum(level, cursor, light)) {
-                           out.add(cursor.asLong());
-                        }
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
-
-   private static boolean isBudLight(int light) {
-      return light == 1 || light == 2 || light == 4 || light == 5;
-   }
-
-   private static boolean touchesGeode(ClientWorld level, BlockPos pos) {
-      for (Direction direction : Direction.values()) {
-         if (isGeode(level.getBlockState(pos.offset(direction)))) {
-            return true;
-         }
-      }
-
-      return false;
-   }
-
-   private static boolean isLocalMaximum(ClientWorld level, BlockPos pos, int light) {
-      for (Direction direction : Direction.values()) {
-         if (level.getLightLevel(LightType.BLOCK, pos.offset(direction)) >= light) {
-            return false;
-         }
-      }
-
-      return true;
-   }
-
    private static boolean isBud(BlockState state) {
       Block block = state.getBlock();
       return block == Blocks.SMALL_AMETHYST_BUD || block == Blocks.MEDIUM_AMETHYST_BUD || block == Blocks.LARGE_AMETHYST_BUD;
@@ -341,7 +373,11 @@ public final class AmethystBypassModule extends ClientModule {
          for (long packed : current) {
             BlockPos pos = BlockPos.fromLong(packed);
             if (LevelUtil.isLoaded(level, pos.getX() >> 4, pos.getZ() >> 4)) {
-               GizmoDrawing.box(new Box(pos), style).ignoreOcclusion();
+               Box box = new Box(pos);
+               if (event.frustum == null || event.frustum.isVisible(box)) {
+                  GizmoDrawing.box(box, style).ignoreOcclusion();
+               }
+
                if (drawTracers) {
                   TracerEngine.draw(Vec3d.ofCenter(pos), -3636481);
                }

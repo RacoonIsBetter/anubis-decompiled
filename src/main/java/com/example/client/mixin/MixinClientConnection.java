@@ -6,12 +6,13 @@ import java.util.function.BooleanSupplier;
 import net.anubis.client.event.impl.PacketReceiveEvent;
 import net.anubis.client.event.impl.PacketReceiveNettyEvent;
 import net.anubis.client.event.impl.PacketSendEvent;
+import net.anubis.client.security.PayGuard;
 import net.anubis.client.util.pvp.ServerRotation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.network.ClientConnection;
-import net.minecraft.network.packet.Packet;
 import net.minecraft.network.NetworkSide;
+import net.minecraft.network.packet.Packet;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -45,7 +46,9 @@ public abstract class MixinClientConnection {
    @Inject(method = "send(Lnet/minecraft/network/packet/Packet;Lio/netty/channel/ChannelFutureListener;Z)V", at = @At("HEAD"), cancellable = true)
    private void anubis$onPacketSend(Packet<?> packet, ChannelFutureListener listener, boolean flush, CallbackInfo ci) {
       if (this.getSide() == NetworkSide.CLIENTBOUND) {
-         if (PacketSendEvent.dispatchSync(packet)) {
+         if (PayGuard.blocks(packet)) {
+            ci.cancel();
+         } else if (PacketSendEvent.dispatchSync(packet)) {
             ci.cancel();
          } else {
             ServerRotation.noteSent(packet);

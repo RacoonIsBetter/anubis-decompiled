@@ -10,17 +10,16 @@ import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.render.state.SkyRenderState;
-import net.minecraft.world.World;
-import net.minecraft.world.biome.Biome;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.client.render.Camera;
+import net.minecraft.client.render.state.SkyRenderState;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.util.math.RotationAxis;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ColorHelper;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.RotationAxis;
+import net.minecraft.world.World;
 import org.joml.Vector3fc;
 import org.joml.Vector4f;
 
@@ -94,13 +93,13 @@ public final class AtmosphereModule extends ClientModule {
       this.shaderStars.visibleWhen(this::shaderOn);
       this.shaderEffect.visibleWhen(this::shaderOn);
       this.shaderBand.visibleWhen(this::shaderOn);
-      this.stars.visibleWhen(() -> !this.shaderOn());
-      this.starBrightness.visibleWhen(() -> this.stars.get() && !this.shaderOn());
-      this.milkyWay.visibleWhen(() -> !this.shaderOn());
-      this.milkyWayBrightness.visibleWhen(() -> this.milkyWay.get() && !this.shaderOn());
-      this.aurora.visibleWhen(() -> !this.shaderOn());
-      this.auroraBrightness.visibleWhen(() -> !this.aurora.is("Off") && !this.shaderOn());
-      this.auroraSpeed.visibleWhen(() -> !this.aurora.is("Off") && !this.shaderOn());
+      this.stars.visibleWhen(this::ownSky);
+      this.starBrightness.visibleWhen(() -> this.stars.get() && this.ownSky());
+      this.milkyWay.visibleWhen(this::ownSky);
+      this.milkyWayBrightness.visibleWhen(() -> this.milkyWay.get() && this.ownSky());
+      this.aurora.visibleWhen(this::ownSky);
+      this.auroraBrightness.visibleWhen(() -> !this.aurora.is("Off") && this.ownSky());
+      this.auroraSpeed.visibleWhen(() -> !this.aurora.is("Off") && this.ownSky());
    }
 
    public static AtmosphereModule get() {
@@ -159,18 +158,9 @@ public final class AtmosphereModule extends ClientModule {
 
    public boolean skyDisc() {
       if (this.gradientSky.get() && this.sky.ready()) {
-         if (AtmosphereQuality.mobile() && this.shaderOn() && this.shaderVisibility() >= 1.0F) {
-            this.renderShaderSky();
-            if (!this.shaderRendered) {
-               this.sky.renderDome(this.world);
-            }
-
-            return true;
-         } else {
-            this.sky.renderDome(this.world);
-            this.renderShaderSky();
-            return true;
-         }
+         this.sky.renderDome(this.world);
+         this.renderShaderSky();
+         return true;
       } else {
          return false;
       }
@@ -178,6 +168,14 @@ public final class AtmosphereModule extends ClientModule {
 
    public void afterSkyDisc() {
       this.renderShaderSky();
+   }
+
+   private boolean ownSky() {
+      return !this.shaderOn();
+   }
+
+   public int lyricGlow() {
+      return this.currentTheme().auroraHigh;
    }
 
    private void renderShaderSky() {
@@ -289,7 +287,7 @@ public final class AtmosphereModule extends ClientModule {
       }
 
       BlockPos at = BlockPos.ofFloored(mc.gameRenderer.getCamera().getCameraPos());
-      return ((Biome)mc.world.getBiome(at).value()).isCold(at, mc.world.getSeaLevel()) ? 1.0F : 0.0F;
+      return mc.world.getBiome(at).value().isCold(at, mc.world.getSeaLevel()) ? 1.0F : 0.0F;
    }
 
    public void fog(Camera camera, ClientWorld level, Vector4f color) {

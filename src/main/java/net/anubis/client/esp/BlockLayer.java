@@ -18,17 +18,16 @@ import net.anubis.client.event.impl.Render3DEvent;
 import net.anubis.client.module.impl.client.PerformanceModule;
 import net.anubis.client.util.BlockBoxHelper;
 import net.anubis.client.util.BlockClusterGeometry;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.TracerEngine;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.DrawStyle;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
+import net.minecraft.client.render.Frustum;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.Frustum;
+import net.minecraft.world.debug.gizmo.GizmoDrawing;
 
 @Environment(EnvType.CLIENT)
 public final class BlockLayer {
@@ -39,7 +38,6 @@ public final class BlockLayer {
    private final BlockLayer.Palette palette;
    private final Supplier<Object> dimension;
    private final Map<Object, BlockLayer.World> worlds = new HashMap<>();
-   private BlockBoxCache boxCache;
 
    public BlockLayer(BlockLayer.Palette palette, Supplier<Object> dimension) {
       this.palette = palette;
@@ -73,7 +71,6 @@ public final class BlockLayer {
 
    public void clear() {
       this.worlds.clear();
-      this.boxCache = null;
    }
 
    public void retainChunk(long chunkKey, LongPredicate keep) {
@@ -298,8 +295,7 @@ public final class BlockLayer {
          bornAt = Math.min(bornAt, ((BlockLayer.Found)world.positions.get(positions[i])).bornAt());
 
          for (BlockPos next : new BlockPos[]{pos.east(), pos.west(), pos.south(), pos.north()}) {
-            if ((next.getX() >> 4 != cx || next.getZ() >> 4 != cz)
-               && same.contains(next.getX(), next.getY(), next.getZ())) {
+            if ((next.getX() >> 4 != cx || next.getZ() >> 4 != cz) && same.contains(next.getX(), next.getY(), next.getZ())) {
                links.add(next.asLong());
             }
          }
@@ -406,18 +402,6 @@ public final class BlockLayer {
          float fillAlpha = style.fillAlpha.get();
          float boxSize = style.boxSize.get();
          double range = style.range.get();
-         boolean mobile = MobilePerformance.active();
-         BlockBoxCache boxes = null;
-         if (mobile && !outline) {
-            if (this.boxCache == null) {
-               this.boxCache = new BlockBoxCache(4096);
-            }
-
-            this.boxCache.beginFrame(boxSize);
-            boxes = this.boxCache;
-         } else if (!mobile) {
-            this.boxCache = null;
-         }
 
          for (BlockLayer.Shapes shapes : nearbyShapes(world, eye, range)) {
             if (frustum == null || frustum.isVisible(shapes.bounds())) {
@@ -436,7 +420,7 @@ public final class BlockLayer {
                         if (outline) {
                            drawOutline(cluster, stroke, fill, width, glow, scale);
                         } else {
-                           drawBoxes(cluster, stroke, fill, width, boxSize * scale, scale == 1.0F ? boxes : null);
+                           drawBoxes(cluster, stroke, fill, width, boxSize * scale);
                         }
                      }
                   }
@@ -453,8 +437,7 @@ public final class BlockLayer {
          DrawStyle style = DrawStyle.filled(fill);
 
          for (BlockClusterGeometry.Face face : mesh.faces()) {
-            GizmoDrawing.quad(grow(face.a(), c, scale), grow(face.b(), c, scale), grow(face.c(), c, scale), grow(face.d(), c, scale), style)
-               .ignoreOcclusion();
+            GizmoDrawing.quad(grow(face.a(), c, scale), grow(face.b(), c, scale), grow(face.c(), c, scale), grow(face.d(), c, scale), style).ignoreOcclusion();
          }
       }
 
@@ -471,11 +454,11 @@ public final class BlockLayer {
       }
    }
 
-   private static void drawBoxes(BlockLayer.Cluster cluster, int stroke, int fill, float width, float size, BlockBoxCache cache) {
+   private static void drawBoxes(BlockLayer.Cluster cluster, int stroke, int fill, float width, float size) {
       DrawStyle style = fill >>> 24 > 0 ? DrawStyle.filledAndStroked(stroke, width, fill) : DrawStyle.stroked(stroke, width);
 
       for (long pos : cluster.positions()) {
-         Box bounds = cache == null ? BlockBoxHelper.scaledBlockBox(BlockPos.fromLong(pos), size) : cache.box(pos);
+         Box bounds = BlockBoxHelper.scaledBlockBox(BlockPos.fromLong(pos), size);
          GizmoDrawing.box(bounds, style).ignoreOcclusion();
       }
    }
@@ -498,19 +481,8 @@ public final class BlockLayer {
       if (mc.player != null) {
          Vec3d eye = mc.player.getCameraPosVec(1.0F);
          double rangeSq = (double)style.range.get() * style.range.get();
-         List<BlockLayer.Vein> visible = this.veins();
-         BlockLayer.World world = this.world(false);
-         if (MobilePerformance.active() && world != null) {
-            if (world.tracerCandidates == null) {
-               world.tracerCandidates = new HorizontalCandidates<>(veinx -> veinx.center().x, veinx -> veinx.center().z);
-            }
 
-            visible = world.tracerCandidates.select(visible, eye.x, eye.z, style.range.get());
-         } else if (world != null) {
-            world.tracerCandidates = null;
-         }
-
-         for (BlockLayer.Vein vein : visible) {
+         for (BlockLayer.Vein vein : this.veins()) {
             if (!(eye.squaredDistanceTo(vein.center()) > rangeSq)) {
                int color = this.palette.tracerColor(vein.kind());
                if (color >>> 24 != 0) {
@@ -582,6 +554,5 @@ public final class BlockLayer {
       int candidateZ;
       double candidateRange;
       final List<BlockLayer.Shapes> candidates = new ArrayList<>();
-      HorizontalCandidates<BlockLayer.Vein> tracerCandidates;
    }
 }

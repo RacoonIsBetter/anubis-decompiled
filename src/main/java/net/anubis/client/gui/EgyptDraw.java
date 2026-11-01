@@ -19,12 +19,8 @@ public final class EgyptDraw {
    public static final int GOLD_TEXT = -1326998;
    public static final int LACQUER = -16120059;
    public static final int SAND = -2513573;
-   public static final int SAND_PALE = -1454184;
-   public static final int SAND_DARK = -4618945;
    public static final int LAPIS = -13738055;
    public static final int LAPIS_LIGHT = -12750874;
-   public static final int LAPIS_DEEP = -14994064;
-   public static final int TURQUOISE = -12794702;
    public static final int MALACHITE = -12600956;
    public static final int CARNELIAN = -2537681;
    public static final int TEXT = -923950;

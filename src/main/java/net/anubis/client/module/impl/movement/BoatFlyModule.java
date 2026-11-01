@@ -13,11 +13,11 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.NumberSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.entity.JumpingMount;
-import net.minecraft.network.packet.s2c.play.VehicleMoveS2CPacket;
-import net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.JumpingMount;
+import net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket;
+import net.minecraft.network.packet.s2c.play.VehicleMoveS2CPacket;
 
 @Environment(EnvType.CLIENT)
 public final class BoatFlyModule extends ClientModule {
@@ -64,8 +64,8 @@ public final class BoatFlyModule extends ClientModule {
    }
 
    private void onPacketSend(PacketSendEvent event) {
-      if (this.antiKick.get() && event.packet instanceof VehicleMoveC2SPacket packet) {
-         this.antiKicker.onPacketSend(packet, this.delay.getInt());
+      if (this.antiKick.get() && event.packet instanceof VehicleMoveC2SPacket packet && this.antiKicker.onPacketSend(packet, this.delay.getInt())) {
+         event.setCancelled(true);
       }
    }
 

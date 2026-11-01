@@ -9,20 +9,19 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.combat.CombatTarget;
 import net.anubis.client.util.glyph.GlyphCanvas;
 import net.anubis.client.util.glyph.GlyphShapes;
 import net.anubis.client.util.glyph.GlyphTint;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.random.Random;
-import net.minecraft.client.world.ClientWorld;
 
 @Environment(EnvType.CLIENT)
 public final class TargetEspModule extends ClientModule {
@@ -297,7 +296,7 @@ public final class TargetEspModule extends ClientModule {
          this.canvas.line(px, base, pz, px, top, pz, post, 1.4F);
       }
 
-      int grains = MobilePerformance.particles(40, 20);
+      int grains = 40;
 
       for (int i = 0; i < grains; i++) {
          float lead = GRAIN_SEEDS[i * 3];
@@ -426,7 +425,7 @@ public final class TargetEspModule extends ClientModule {
    }
 
    private void ring(double x, double y, double z, float inner, float outer, int segments, int color) {
-      this.canvas.ring(x, y, z, inner, outer, MobilePerformance.segments(segments, 12), color);
+      this.canvas.ring(x, y, z, inner, outer, segments, color);
    }
 
    private static float[] scatter(int count, long salt) {

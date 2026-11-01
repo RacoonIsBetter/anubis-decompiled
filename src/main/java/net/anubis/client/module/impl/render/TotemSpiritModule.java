@@ -11,19 +11,17 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.combat.TotemPops;
 import net.anubis.client.util.glyph.GlyphCanvas;
 import net.anubis.client.util.glyph.GlyphShapes;
 import net.anubis.client.util.glyph.GlyphTint;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.Box;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.world.ClientWorld;
 
 @Environment(EnvType.CLIENT)
 public final class TotemSpiritModule extends ClientModule {
@@ -71,8 +69,6 @@ public final class TotemSpiritModule extends ClientModule {
    private final float[] pitch = new float[PARTS.length];
    private final float[] yaw = new float[PARTS.length];
    private final float[] roll = new float[PARTS.length];
-   private final float[] rotations = new float[PARTS.length * 6];
-   private boolean cachedPose;
    private int head;
    private int count;
    private ClientWorld boundLevel;
@@ -192,9 +188,7 @@ public final class TotemSpiritModule extends ClientModule {
 
             for (int n = 0; n < this.count; n++) {
                TotemSpiritModule.Spirit spirit = this.spirits[(this.head + n) % 12];
-               if ((!spirit.mine || this.own.get())
-                  && !(this.canvas.distanceSqr(spirit.x, spirit.y, spirit.z) > 9216.0)
-                  && (!MobilePerformance.active() || event.frustum == null || event.frustum.isVisible(this.renderBounds(spirit)))) {
+               if ((!spirit.mine || this.own.get()) && !(this.canvas.distanceSqr(spirit.x, spirit.y, spirit.z) > 9216.0)) {
                   this.draw(spirit, Math.min(1.0F, (float)(now - spirit.born) / life));
                }
             }
@@ -202,14 +196,6 @@ public final class TotemSpiritModule extends ClientModule {
             this.canvas.submit(this.throughWalls.get());
          }
       }
-   }
-
-   private Box renderBounds(TotemSpiritModule.Spirit spirit) {
-      double scale = Math.max(0.01F, spirit.scale);
-      double radius = scale * 2.0 + 0.25;
-      return new Box(
-         spirit.x - radius, spirit.y - scale, spirit.z - radius, spirit.x + radius, spirit.y + this.ascent.get() * 1.3 + scale * 3.5 + 0.5, spirit.z + radius
-      );
    }
 
    private void draw(TotemSpiritModule.Spirit s, float t) {
@@ -236,11 +222,6 @@ public final class TotemSpiritModule extends ClientModule {
       this.leanCos = MathHelper.cos(lean);
       this.drop = s.crouch ? 3.0F * (1.0F - ka) : 0.0F;
       this.pose(s, ka);
-      this.cachedPose = MobilePerformance.active();
-      if (this.cachedPose) {
-         this.cachePose();
-      }
-
       boolean glass = this.look.is("Glass");
       int gold = this.palette.primary();
       int lapis = this.palette.secondary();
@@ -290,13 +271,12 @@ public final class TotemSpiritModule extends ClientModule {
    private void place(int index, float inflate) {
       float[] part = PARTS[index];
       boolean torso = index >= 2;
-      int r = index * 6;
-      float cp = this.cachedPose ? this.rotations[r] : MathHelper.cos(this.pitch[index]);
-      float sp = this.cachedPose ? this.rotations[r + 1] : MathHelper.sin(this.pitch[index]);
-      float cy = this.cachedPose ? this.rotations[r + 2] : MathHelper.cos(this.yaw[index]);
-      float sy = this.cachedPose ? this.rotations[r + 3] : MathHelper.sin(this.yaw[index]);
-      float cr = this.cachedPose ? this.rotations[r + 4] : MathHelper.cos(this.roll[index]);
-      float sr = this.cachedPose ? this.rotations[r + 5] : MathHelper.sin(this.roll[index]);
+      float cp = MathHelper.cos(this.pitch[index]);
+      float sp = MathHelper.sin(this.pitch[index]);
+      float cy = MathHelper.cos(this.yaw[index]);
+      float sy = MathHelper.sin(this.yaw[index]);
+      float cr = MathHelper.cos(this.roll[index]);
+      float sr = MathHelper.sin(this.roll[index]);
 
       for (int c = 0; c < 8; c++) {
          float lx = (c & 1) == 0 ? part[3] - inflate : part[6] + inflate;
@@ -321,18 +301,6 @@ public final class TotemSpiritModule extends ClientModule {
          this.corners[o] = this.originX + (px * this.leftX + pz * this.forwardX) * this.unit;
          this.corners[o + 1] = this.originY + py * this.unit;
          this.corners[o + 2] = this.originZ + (px * this.leftZ + pz * this.forwardZ) * this.unit;
-      }
-   }
-
-   private void cachePose() {
-      for (int i = 0; i < PARTS.length; i++) {
-         int r = i * 6;
-         this.rotations[r] = MathHelper.cos(this.pitch[i]);
-         this.rotations[r + 1] = MathHelper.sin(this.pitch[i]);
-         this.rotations[r + 2] = MathHelper.cos(this.yaw[i]);
-         this.rotations[r + 3] = MathHelper.sin(this.yaw[i]);
-         this.rotations[r + 4] = MathHelper.cos(this.roll[i]);
-         this.rotations[r + 5] = MathHelper.sin(this.roll[i]);
       }
    }
 
@@ -370,9 +338,9 @@ public final class TotemSpiritModule extends ClientModule {
       int gold = this.palette.primary();
       int lapis = this.palette.secondary();
       int light = this.palette.highlight();
-      this.canvas.ring(s.x, y, s.z, radius * 0.93F, radius, MobilePerformance.segments(40, 24), GlyphTint.alpha(gold, a));
-      this.canvas.ring(s.x, y, s.z, radius, radius * 1.12F, MobilePerformance.segments(40, 24), GlyphTint.alpha(gold, a * 0.25F));
-      this.canvas.ring(s.x, y, s.z, radius * 0.55F, radius * 0.6F, MobilePerformance.segments(32, 16), GlyphTint.alpha(lapis, a * 0.7F));
+      this.canvas.ring(s.x, y, s.z, radius * 0.93F, radius, 40, GlyphTint.alpha(gold, a));
+      this.canvas.ring(s.x, y, s.z, radius, radius * 1.12F, 40, GlyphTint.alpha(gold, a * 0.25F));
+      this.canvas.ring(s.x, y, s.z, radius * 0.55F, radius * 0.6F, 32, GlyphTint.alpha(lapis, a * 0.7F));
       float base = (float)Math.toRadians(s.bodyYaw) + open * 0.6F;
 
       for (int i = 0; i < 4; i++) {

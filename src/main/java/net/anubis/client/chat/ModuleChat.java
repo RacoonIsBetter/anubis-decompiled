@@ -1,13 +1,13 @@
 package net.anubis.client.chat;
 
 import net.anubis.client.config.ThemeStore;
-import net.anubis.client.gui.ToggleToasts;
+import net.anubis.client.gui.ThemeTint;
 import net.anubis.client.module.ClientModule;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.text.Text;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.MutableText;
+import net.minecraft.text.Text;
 
 @Environment(EnvType.CLIENT)
 public final class ModuleChat {
@@ -53,8 +53,29 @@ public final class ModuleChat {
       });
    }
 
-   public static void toggleLine(ClientModule module, ModuleChat.Body state) {
-      ToggleToasts.show(module, module.isEnabled());
+   public static void sendAs(String name, ModuleChat.Body body) {
+      Text built = body.build();
+      onClientThread(() -> {
+         MinecraftClient mc = MinecraftClient.getInstance();
+         if (mc.inGameHud != null) {
+            mc.inGameHud.getChatHud().addMessage(line(name, built));
+         }
+      });
+   }
+
+   public static void sendAlways(ClientModule module, ModuleChat.Body body) {
+      Text built = body.build();
+      onClientThread(() -> addLine(module, built));
+   }
+
+   public static void actionBarAlways(ClientModule module, ModuleChat.Body body) {
+      Text built = body.build();
+      onClientThread(() -> {
+         MinecraftClient mc = MinecraftClient.getInstance();
+         if (mc.inGameHud != null) {
+            mc.inGameHud.setOverlayMessage(line(module, built), false);
+         }
+      });
    }
 
    private static void addLine(ClientModule module, Text body) {
@@ -65,11 +86,15 @@ public final class ModuleChat {
    }
 
    private static MutableText line(ClientModule module, Text body) {
+      return line(module.name(), body);
+   }
+
+   private static MutableText line(String name, Text body) {
       return Text.empty()
          .append(Text.literal("[").withColor(5592405))
-         .append(Text.literal("Anubis Client").withColor(ThemeStore.get().accent.rgb()))
+         .append(Text.literal("Anubis Client").withColor(ThemeTint.accent(ThemeStore.get().accent.argb()) & 16777215))
          .append(Text.literal("] ").withColor(5592405))
-         .append(Text.literal(module.name()).withColor(16777215))
+         .append(Text.literal(name).withColor(16777215))
          .append(Text.literal(" : ").withColor(5592405))
          .append(Text.empty().withColor(11184810).append(body));
    }
