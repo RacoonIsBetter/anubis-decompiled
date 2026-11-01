@@ -80,12 +80,18 @@ Each loaded chunk gets a probability from independent signals:
 | Signs / banners / heads | Any sign, hanging sign, banner or mob head (ignored inside strongholds, ancient cities, trial chambers, dungeons) |
 | Lit nether portal | Ruined portals are never lit, so a lit portal was lit by a player |
 | Buried farm | Farmland or crops well below the surface |
+| Hidden light source | **Off by default** (setting *Hidden Lights (Light Leaks)*). Under servers that send the underground as fake deepslate (DonutSMP, ChunkVeil), reads the block light the server still sends (Anubis 1.0's `ServerBlockLight`): a fake solid block brighter than all its neighbours (13+) is a hidden torch or lantern. Lush caves, deep lava and stacked glow berries are filtered, but trial chambers and stray glow berries still light up, and servers that blank the light (ChunkVeil's default `sanitize-light`) give nothing |
 | Dug-out room | A deep room with a flat solid floor and a flat solid ceiling over at least 5x5 blocks |
 | Rotated deepslate | Natural deepslate is always vertical; sideways means placed |
 | Hand-mined tunnel / shaft | Straight 1x2 corridors or 1x1 shafts with solid walls, deep underground |
 | Crafted blocks, Redstone, Placed lights, Building blocks | Player blocks buried below the surface |
 | Grown amethyst / kelp, long dripstone | Growth that only happens while players keep the chunk loaded |
 | Obsidian | Weak signal, ignored next to ruined portals |
+
+On servers that hide the underground below Y=0 as flat deepslate (DonutSMP and plugins like
+ChunkVeil), those chunks are recognised: the panel says how many loaded chunks have their
+underground hidden, block changes there aren't treated as digging, and rooms/tunnels aren't
+looked for on the fake flat floor.
 
 Chunks with strongholds, ancient cities, trial chambers, dungeons and ocean monuments have the
 matching false positives suppressed. Flagged chunks get a soft tile at the depth of the

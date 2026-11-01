@@ -13,6 +13,7 @@ public enum Signal {
    PLAYER("Player underground", 0.70F, 1, Group.PLAYERS),
    HIDDEN_PLAYER("Hidden player activity", 0.65F, 1, Group.PLAYERS),
    STORAGE("Player storage", 0.60F, 3, Group.BLOCKS),
+   HIDDEN_LIGHT("Hidden light source", 0.50F, 2, Group.BLOCKS),
    PLACED_ENTITIES("Item frames / armor stands", 0.60F, 2, Group.ENTITIES),
    PETS("Pets / named mobs", 0.55F, 1, Group.ENTITIES),
    ROTATED_DEEPSLATE("Rotated deepslate", 0.55F, 3, Group.BLOCKS),

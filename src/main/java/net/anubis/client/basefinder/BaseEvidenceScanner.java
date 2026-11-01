@@ -1,8 +1,10 @@
 package net.anubis.client.basefinder;
 
+import it.unimi.dsi.fastutil.longs.LongArrayList;
 import java.util.Arrays;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import net.anubis.client.util.ServerBlockLight;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.block.AbstractSkullBlock;
@@ -17,6 +19,7 @@ import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.Heightmap;
+import net.minecraft.world.biome.BiomeKeys;
 import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.WorldChunk;
 
@@ -35,6 +38,9 @@ public final class BaseEvidenceScanner {
    private static final int LONG_DRIPSTONE = 8;
    /** Side of the square floor a dug-out room must have, all at one floor and one ceiling height (3 or 4 blocks up). */
    private static final int ROOM_SIZE = 5;
+   /** Torches are 14, lanterns and glowstone 15; glow lichen (7) and amethyst (5) stay below this. */
+   private static final int HIDDEN_LIGHT_MIN = 13;
+   private static final int DEEP_LAVA_Y = -50;
    /** A surface block only counts as part of a build when it sits in a straight line of this many. */
    private static final int SURFACE_LINE = 3;
    /** Below this many lined-up surface blocks, a chunk's surface is treated as scattered junk. */
@@ -79,7 +85,9 @@ public final class BaseEvidenceScanner {
    private static final byte MARK_MINESHAFT = 29;
    /** Wall torches on planks: mineshaft supports carry these, players' bases sometimes do. */
    private static final byte PLANK_TORCH = 30;
-   private static final byte CATEGORY_COUNT = 31;
+   /** A light source the server hides: real block light peaking inside a faked solid block. */
+   private static final byte HIDDEN_LIGHT = 31;
+   private static final byte CATEGORY_COUNT = 32;
 
    private final Map<Block, Byte> categories = new IdentityHashMap<>();
    private final int[] surface = new int[256];
@@ -89,7 +97,11 @@ public final class BaseEvidenceScanner {
    private byte[] grid = new byte[0];
    private final BlockPos.Mutable cursor = new BlockPos.Mutable();
 
-   public ChunkReport scan(ClientWorld level, WorldChunk chunk, Options options) {
+   /**
+    * {@code serverLight} is the chunk's block light as the server sent it (may be null). The client's
+    * own light engine can't be used for hidden lights: it relights borders with the fake blocks.
+    */
+   public ChunkReport scan(ClientWorld level, WorldChunk chunk, Options options, ServerBlockLight.Column serverLight) {
       int baseX = chunk.getPos().getStartX();
       int baseZ = chunk.getPos().getStartZ();
       int gridMin = Math.max(GRID_MIN_Y, level.getBottomY());
@@ -144,6 +156,9 @@ public final class BaseEvidenceScanner {
          // nothing but deepslate until you can see it. Real deepslate layers always have tuff, ores or gravel.
          if (baseY < 0 && !section.hasAny(state -> !state.isAir() && !state.isOf(Blocks.DEEPSLATE))) {
             this.masked = true;
+            if (options.blocks() && options.hiddenLights() && serverLight != null) {
+               this.hiddenLights(level, section, serverLight, chunk.getPos().x, baseY, chunk.getPos().z);
+            }
          }
 
          boolean inGrid = wantGrid && baseY + 15 >= gridMin && baseY <= gridMax;
@@ -344,6 +359,7 @@ public final class BaseEvidenceScanner {
       }
 
       this.give(report, Signal.FARM, FARMLAND);
+      this.give(report, Signal.HIDDEN_LIGHT, HIDDEN_LIGHT);
       if (!ancientCity && !trial) {
          this.give(report, Signal.REDSTONE, REDSTONE);
       }
@@ -552,6 +568,87 @@ public final class BaseEvidenceScanner {
       return length;
    }
 
+   /**
+    * The blocks of a masked section are fake, but some servers still send its real block light (the
+    * idea behind Anubis 1.0's LightLeakScanner and ServerBlockLight). Light can't get into a solid block, so a fake solid cell
+    * at 13+ that is brighter than all six neighbours is where a torch, lantern or other bright block
+    * really sits. Plateaus (lava pools) and dim natural lights (glow lichen, amethyst) don't count.
+    */
+   private void hiddenLights(ClientWorld level, ChunkSection section, ServerBlockLight.Column light, int chunkX, int baseY, int chunkZ) {
+      int baseX = chunkX << 4;
+      int baseZ = chunkZ << 4;
+      LongArrayList peaks = new LongArrayList();
+
+      for (int y = 0; y < 16; y++) {
+         for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+               int value = light.get(baseX + x, baseY + y, baseZ + z);
+               // Lava pools fill the bottom of the world up to Y=-54; a lantern down there looks the same.
+               if (value >= HIDDEN_LIGHT_MIN && !(value == 15 && baseY + y <= DEEP_LAVA_Y) && section.getBlockState(x, y, z).isOpaqueFullCube()
+                  && peak(light, value, baseX, baseY, baseZ, x, y, z)) {
+                  peaks.add(BlockPos.asLong(baseX + x, baseY + y, baseZ + z));
+               }
+            }
+         }
+      }
+
+      for (int i = 0; i < peaks.size(); i++) {
+         long pos = peaks.getLong(i);
+         if (!stacked(peaks, pos) && !this.lushNear(level, pos)) {
+            this.note(HIDDEN_LIGHT, pos);
+         }
+      }
+   }
+
+   /** Glow berries hang in strings: another bright peak straight above or below means cave vines, not a torch. */
+   private static boolean stacked(LongArrayList peaks, long pos) {
+      int x = BlockPos.unpackLongX(pos);
+      int y = BlockPos.unpackLongY(pos);
+      int z = BlockPos.unpackLongZ(pos);
+
+      for (int i = 0; i < peaks.size(); i++) {
+         long other = peaks.getLong(i);
+         if (other != pos && BlockPos.unpackLongX(other) == x && BlockPos.unpackLongZ(other) == z && Math.abs(BlockPos.unpackLongY(other) - y) <= 4) {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   /** The client keeps the real biomes of masked chunks, so glow berries' lush caves can still be told apart. */
+   private boolean lushNear(ClientWorld level, long pos) {
+      int x = BlockPos.unpackLongX(pos);
+      int y = BlockPos.unpackLongY(pos);
+      int z = BlockPos.unpackLongZ(pos);
+      int[][] offsets = {{0, 0, 0}, {6, 0, 0}, {-6, 0, 0}, {0, 0, 6}, {0, 0, -6}, {0, 6, 0}, {0, -6, 0}};
+
+      for (int[] o : offsets) {
+         if (level.getBiome(this.cursor.set(x + o[0], y + o[1], z + o[2])).matchesKey(BiomeKeys.LUSH_CAVES)) {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   /** Brighter than every neighbour in this chunk column; neighbours in other chunks are not known here. */
+   private static boolean peak(ServerBlockLight.Column light, int value, int baseX, int baseY, int baseZ, int x, int y, int z) {
+      for (Direction direction : Direction.values()) {
+         int nx = x + direction.getOffsetX();
+         int nz = z + direction.getOffsetZ();
+         if (nx < 0 || nx > 15 || nz < 0 || nz > 15) {
+            continue;
+         }
+
+         if (light.get(baseX + nx, baseY + y + direction.getOffsetY(), baseZ + nz) >= value) {
+            return false;
+         }
+      }
+
+      return true;
+   }
+
    private static boolean soft(BlockState state) {
       return state.isIn(BlockTags.DIRT) || state.isOf(Blocks.CLAY) || state.isOf(Blocks.GRAVEL) || state.isIn(BlockTags.SAND);
    }
@@ -661,6 +758,6 @@ public final class BaseEvidenceScanner {
    }
 
    @Environment(EnvType.CLIENT)
-   public record Options(boolean blocks, boolean tunnels, boolean growth, int tunnelLength) {
+   public record Options(boolean blocks, boolean tunnels, boolean growth, int tunnelLength, boolean hiddenLights) {
    }
 }

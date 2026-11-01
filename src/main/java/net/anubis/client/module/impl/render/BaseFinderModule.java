@@ -36,6 +36,7 @@ import net.anubis.client.module.setting.NumberSetting;
 import net.anubis.client.util.FoglessLines;
 import net.anubis.client.util.LevelUtil;
 import net.anubis.client.util.PerformanceBudget;
+import net.anubis.client.util.ServerBlockLight;
 import net.anubis.client.util.TracerEngine;
 import net.anubis.client.util.playerbypass2.SimulationSignals;
 import net.fabricmc.api.EnvType;
@@ -69,6 +70,7 @@ import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.packet.s2c.play.BlockBreakingProgressS2CPacket;
 import net.minecraft.network.packet.s2c.play.BlockEventS2CPacket;
 import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
+import net.minecraft.network.packet.s2c.play.LightUpdateS2CPacket;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -123,6 +125,11 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final NumberSetting threshold = this.addSetting("min-probability", new NumberSetting("Min Probability %", 40.0F, 10.0F, 95.0F).step(5.0F));
    private final NumberSetting range = this.addSetting("range", new NumberSetting("Range", 512.0F, 64.0F, 2048.0F).step(16.0F));
    private final BooleanSetting scanBlocks = this.addSetting("placed-blocks", new BooleanSetting("Placed Blocks", true));
+   /**
+    * Off by default: it only works when the server leaks real light from hidden chunks (ChunkVeil's
+    * default sanitize-light does not), and glow berries, trial chambers and lava pockets also light up.
+    */
+   private final BooleanSetting hiddenLights = this.addSetting("hidden-lights", new BooleanSetting("Hidden Lights (Light Leaks)", false));
    private final BooleanSetting scanTunnels = this.addSetting("tunnels", new BooleanSetting("Tunnels & Shafts", true));
    private final NumberSetting tunnelLength = this.addSetting("tunnel-length", new NumberSetting("Tunnel Length", 8.0F, 5.0F, 15.0F).step(1.0F));
    private final BooleanSetting scanGrowth = this.addSetting("growth", new BooleanSetting("Growth (Amethyst, Kelp)", true));
@@ -154,6 +161,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final LongArrayList pendingOpens = new LongArrayList();
    /** Chunks whose underground the server is hiding (sent as plain deepslate or air). */
    private final LongOpenHashSet masked = new LongOpenHashSet();
+   /** Block light exactly as the server sent it, before the client relights it around fake blocks. */
+   private final ServerBlockLight serverLight = new ServerBlockLight();
    private Long2ObjectOpenHashMap<EntityEvidence> entityEvidence = new Long2ObjectOpenHashMap<>();
    private final Long2ObjectOpenHashMap<Digging> digging = new Long2ObjectOpenHashMap<>();
    private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
@@ -174,6 +183,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       BooleanSetting notifications = this.usesNotifications();
       this.notifyAbove.visibleWhen(notifications::get);
       this.tunnelLength.visibleWhen(this.scanTunnels::get);
+      this.hiddenLights.visibleWhen(this.scanBlocks::get);
       this.playerMemory.visibleWhen(this.scanPlayers::get);
       this.hiddenPlayers.visibleWhen(this.scanPlayers::get);
       this.highlightY.visibleWhen(() -> this.highlight.is("Fixed Height"));
@@ -201,6 +211,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.pendingBreakers.clear();
       this.pendingOpens.clear();
       this.masked.clear();
+      this.serverLight.clear();
       this.digging.clear();
       this.entityEvidence = new Long2ObjectOpenHashMap<>();
       this.queue.clear();
@@ -242,14 +253,23 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
 
    @EventHandler
    public void onPacketApplied(PacketAppliedEvent event) {
+      ClientWorld level = MinecraftClient.getInstance().world;
       if (event.packet instanceof ChunkDataS2CPacket chunk) {
+         if (level != null) {
+            this.serverLight.onChunk(level, chunk.getChunkX(), chunk.getChunkZ(), chunk.getLightData());
+         }
+
          this.enqueue(ChunkPos.toLong(chunk.getChunkX(), chunk.getChunkZ()));
+      } else if (event.packet instanceof LightUpdateS2CPacket light && level != null) {
+         this.serverLight.onLight(level, light.getChunkX(), light.getChunkZ(), light.getData());
+         this.enqueue(ChunkPos.toLong(light.getChunkX(), light.getChunkZ()));
       }
    }
 
    @EventHandler
    public void onBlockUpdate(BlockUpdateEvent event) {
       if (this.scanning && event.pos != null) {
+         this.serverLight.onBlockChanged(event.pos);
          long key = ChunkPos.toLong(event.pos.getX() >> 4, event.pos.getZ() >> 4);
          if (!this.dirtyAt.containsKey(key)) {
             this.dirtyAt.put(key, this.ticks);
@@ -412,6 +432,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.trackHidden(mc, level);
       if (this.ticks % 200 == 0) {
          this.masked.removeIf(k -> !LevelUtil.isLoaded(level, ChunkPos.getPackedX(k), ChunkPos.getPackedZ(k)));
+         this.serverLight.forgetUnloaded(level);
       }
       if (this.ticks % ENTITY_SCAN_TICKS == 0) {
          this.scanEntities(mc, level);
@@ -444,7 +465,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       long deadline = optimized ? PerformanceBudget.acquire(PerformanceModule.scanBudgetNanos()) : System.nanoTime() + PerformanceModule.scanBudgetNanos();
       long started = System.nanoTime();
       BaseEvidenceScanner.Options options = new BaseEvidenceScanner.Options(
-         this.scanBlocks.get(), this.scanTunnels.get(), this.scanGrowth.get(), this.tunnelLength.getInt()
+         this.scanBlocks.get(), this.scanTunnels.get(), this.scanGrowth.get(), this.tunnelLength.getInt(), this.hiddenLights.get()
       );
 
       try {
@@ -456,7 +477,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
             if (LevelUtil.isLoaded(level, cx, cz)) {
                WorldChunk chunk = level.getChunkManager().getWorldChunk(cx, cz);
                if (chunk != null) {
-                  ChunkReport report = this.scanner.scan(level, chunk, options);
+                  ChunkReport report = this.scanner.scan(level, chunk, options, this.serverLight.column(level, cx, cz));
                   if (this.scanner.masked()) {
                      this.masked.add(key);
                   } else {

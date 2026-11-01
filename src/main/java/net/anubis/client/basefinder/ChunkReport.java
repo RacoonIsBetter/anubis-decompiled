@@ -105,7 +105,7 @@ public final class ChunkReport {
          case AMETHYST, KELP -> signal.label + " (" + count + "% grown)";
          case TUNNEL, SHAFT, DRIPSTONE -> signal.label + (count > 1 ? " x" + count : "");
          case SURFACE_BUILD -> signal.label + " (" + count + " blocks)";
-         case ROOM, NETHER_PORTAL -> signal.label + (count > 1 ? " x" + count : "");
+         case ROOM, NETHER_PORTAL, HIDDEN_LIGHT -> signal.label + (count > 1 ? " x" + count : "");
          default -> signal.label + " x" + count;
       };
    }
