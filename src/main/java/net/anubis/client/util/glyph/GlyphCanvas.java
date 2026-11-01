@@ -1,16 +1,17 @@
 package net.anubis.client.util.glyph;
 
 import java.util.Arrays;
+import net.anubis.client.util.WorldQuads;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.world.debug.gizmo.Gizmo;
-import net.minecraft.world.debug.gizmo.GizmoDrawer;
-import net.minecraft.world.debug.gizmo.VisibilityConfigurable;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.client.render.Camera;
 import net.minecraft.util.math.ColorHelper;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.debug.gizmo.Gizmo;
+import net.minecraft.world.debug.gizmo.GizmoDrawer;
+import net.minecraft.world.debug.gizmo.GizmoDrawing;
+import net.minecraft.world.debug.gizmo.VisibilityConfigurable;
 import org.joml.Vector3fc;
 
 @Environment(EnvType.CLIENT)
@@ -63,7 +64,12 @@ public final class GlyphCanvas implements Gizmo {
    }
 
    public void submit(boolean onTop) {
-      if (this.quads != 0 || this.lines != 0) {
+      if (this.quads > 0) {
+         WorldQuads.layer(onTop).quads(this.quadPos, this.quadColor, this.quads);
+      }
+
+      this.quads = 0;
+      if (this.lines != 0) {
          VisibilityConfigurable properties = GizmoDrawing.collect(this);
          if (onTop) {
             properties.ignoreOcclusion();
@@ -299,30 +305,16 @@ public final class GlyphCanvas implements Gizmo {
       this.band(x, y, z, inner, outer, 0.0F, (float) (Math.PI * 2), segments, argb);
    }
 
-   public void draw(GizmoDrawer out, float alpha) {
-      boolean faded = alpha < 1.0F;
-      double[] q = this.quadPos;
+   @Override
+   public void draw(GizmoDrawer consumer, float opacity) {
+      boolean faded = opacity < 1.0F;
+      double[] l = this.linePos;
       int i = 0;
 
-      for (int p = 0; i < this.quads; p += 12) {
-         int color = faded ? ColorHelper.scaleAlpha(this.quadColor[i], alpha) : this.quadColor[i];
-         out.addQuad(
-            this.vertex(q[p], q[p + 1], q[p + 2]),
-            this.vertex(q[p + 3], q[p + 4], q[p + 5]),
-            this.vertex(q[p + 6], q[p + 7], q[p + 8]),
-            this.vertex(q[p + 9], q[p + 10], q[p + 11]),
-            color
-         );
+      for (int p = 0; i < this.lines; p += 6) {
+         int color = faded ? ColorHelper.scaleAlpha(this.lineColor[i], opacity) : this.lineColor[i];
+         consumer.addLine(this.vertex(l[p], l[p + 1], l[p + 2]), this.vertex(l[p + 3], l[p + 4], l[p + 5]), color, this.lineWidth[i]);
          i++;
-      }
-
-      double[] l = this.linePos;
-      int ix = 0;
-
-      for (int p = 0; ix < this.lines; p += 6) {
-         int color = faded ? ColorHelper.scaleAlpha(this.lineColor[ix], alpha) : this.lineColor[ix];
-         out.addLine(this.vertex(l[p], l[p + 1], l[p + 2]), this.vertex(l[p + 3], l[p + 4], l[p + 5]), color, this.lineWidth[ix]);
-         ix++;
       }
    }
 

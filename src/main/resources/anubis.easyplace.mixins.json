@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "net.anubis.client.easyplace.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "AccessorClientLevel",
+    "AccessorMouseHandler",
+    "InvokerBlockItem",
+    "MixinClientPacketListener"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

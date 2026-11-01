@@ -6,18 +6,16 @@ import net.anubis.client.config.FriendStore;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.ModuleRegistry;
-import net.anubis.client.module.ModuleRevision;
 import net.anubis.client.module.impl.misc.FreecamModule;
 import net.anubis.client.module.impl.render.character.CharacterModule;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.world.ClientWorld;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.math.MathHelper;
 
 @Environment(EnvType.CLIENT)
 abstract class HeadCosmeticModule extends ClientModule {
@@ -31,9 +29,6 @@ abstract class HeadCosmeticModule extends ClientModule {
    private static final float GLINT_STRENGTH = 0.6F;
    private PharaohMesh.Look look;
    private long lookAt;
-   private boolean mobileLook;
-   private long lookRevision;
-   private int lookAccent;
    private final Int2BooleanOpenHashMap friendCache = new Int2BooleanOpenHashMap();
    private WeakReference<ClientWorld> friendLevel = new WeakReference<>(null);
    private long friendsCheckedAt;
@@ -118,30 +113,20 @@ abstract class HeadCosmeticModule extends ClientModule {
    final PharaohMesh.Look look() {
       long now = System.nanoTime();
       PharaohMesh.Look current = this.look;
-      boolean mobile = MobilePerformance.active();
-      long revision = mobile ? ModuleRevision.current() : 0L;
-      int accent = mobile ? CosmeticAccent.argb() : 0;
-      long refresh = mobile ? 33333333L : 4000000L;
-      if (current == null
-         || this.mobileLook != mobile
-         || now - this.lookAt >= refresh
-         || mobile && (this.lookRevision != revision || this.lookAccent != accent)) {
-         float seconds = (float)(now - EPOCH) / 1.0E9F;
-         float phase = seconds % 3.6F / 3.6F;
-         float sweep = (phase * 2.0F - 1.0F) * (float) Math.PI * 1.25F;
-         float envelope = MathHelper.sin(phase * (float) Math.PI);
-         float gain = this.glints() ? 0.6F * envelope * envelope : 0.0F;
-         float pulse = 0.9F + 0.1F * MathHelper.sin(seconds * 2.2F);
-         current = new PharaohMesh.Look(this.palette(), this.glows(), MathHelper.cos(sweep), MathHelper.sin(sweep), gain, pulse);
-         this.look = current;
-         this.lookAt = now;
-         this.mobileLook = mobile;
-         this.lookRevision = revision;
-         this.lookAccent = accent;
-         return current;
-      } else {
+      if (current != null && now - this.lookAt < 4000000L) {
          return current;
       }
+
+      float seconds = (float)(now - EPOCH) / 1.0E9F;
+      float phase = seconds % 3.6F / 3.6F;
+      float sweep = (phase * 2.0F - 1.0F) * (float) Math.PI * 1.25F;
+      float envelope = MathHelper.sin(phase * (float) Math.PI);
+      float gain = this.glints() ? 0.6F * envelope * envelope : 0.0F;
+      float pulse = 0.9F + 0.1F * MathHelper.sin(seconds * 2.2F);
+      current = new PharaohMesh.Look(this.palette(), this.glows(), MathHelper.cos(sweep), MathHelper.sin(sweep), gain, pulse);
+      this.look = current;
+      this.lookAt = now;
+      return current;
    }
 
    static int metal(int accent) {

@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -31,8 +32,10 @@ public final class ThemeStore {
    private static final Logger LOGGER = LoggerFactory.getLogger("Anubis");
    private static final ThemeStore INSTANCE = new ThemeStore();
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-   private static final int CONFIG_VERSION = 3;
+   private static final int CONFIG_VERSION = 4;
    private static final String THEME_KEY = "anubisTheme";
+   private static final String DEFAULT_BANNER = "donutbets-banner.png";
+   private static final String BANNER_RESOURCE = "/assets/anubis/textures/gui/donutbets_banner.png";
    public static final List<ThemeStore.Preset> PRESETS = List.of(
       new ThemeStore.Preset("Default", -13338378, -14736856, -15263458),
       new ThemeStore.Preset("Midnight", -7643914, -15001050, -15461603),
@@ -77,6 +80,7 @@ public final class ThemeStore {
       all.add(this.customMainMenu);
       all.add(this.communityPopup);
       this.settings = List.copyOf(all);
+      useBanner(this.cards);
       this.defaults = snapshot(this.settings, true);
       this.customMainMenu.onChange(() -> {
          MinecraftClient mc = MinecraftClient.getInstance();
@@ -110,6 +114,7 @@ public final class ThemeStore {
 
    public void resetToDefaults() {
       apply(this.shared, this.defaults, true);
+      this.installBanner();
    }
 
    public static Path backgroundsDir() {
@@ -178,27 +183,36 @@ public final class ThemeStore {
    public synchronized void load() {
       if (!this.loaded) {
          this.loaded = true;
-         Path path = this.configPath();
-         if (Files.isRegularFile(path)) {
-            try (Reader reader = Files.newBufferedReader(path)) {
-               JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-               int version = root.has("version") ? root.get("version").getAsInt() : 0;
-               if (version <= 3) {
-                  if (root.has("values") && root.get("values").isJsonObject()) {
-                     apply(this.settings, root.getAsJsonObject("values"), true);
-                  }
+         this.readFile();
+         this.installBanner();
+      }
+   }
 
-                  if (version < 3) {
-                     this.adoptNewDefaults();
-                  }
-               } else {
-                  this.readOnly = true;
-                  LOGGER.warn("[Anubis] Theme version {} is newer than supported {}; skipping load", version, 3);
+   private void readFile() {
+      Path path = this.configPath();
+      if (Files.isRegularFile(path)) {
+         try (Reader reader = Files.newBufferedReader(path)) {
+            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+            int version = root.has("version") ? root.get("version").getAsInt() : 0;
+            if (version <= 4) {
+               if (root.has("values") && root.get("values").isJsonObject()) {
+                  apply(this.settings, root.getAsJsonObject("values"), true);
                }
-            } catch (IOException | RuntimeException e) {
-               LOGGER.warn("[Anubis] Failed to load theme; preserving the file", e);
+
+               if (version < 3) {
+                  this.adoptNewDefaults();
+               }
+
+               if (version < 4) {
+                  this.adoptBanner();
+               }
+            } else {
                this.readOnly = true;
+               LOGGER.warn("[Anubis] Theme version {} is newer than supported {}; skipping load", version, 4);
             }
+         } catch (IOException | RuntimeException e) {
+            LOGGER.warn("[Anubis] Failed to load theme; preserving the file", e);
+            this.readOnly = true;
          }
       }
    }
@@ -219,10 +233,43 @@ public final class ThemeStore {
       }
    }
 
+   private void adoptBanner() {
+      if (this.cards.background.is("None") && this.cards.image.get().isBlank()) {
+         useBanner(this.cards);
+      }
+   }
+
+   private static void useBanner(Surface surface) {
+      surface.background.set("Image");
+      surface.image.set("donutbets-banner.png");
+      surface.coverage.set("Header");
+      surface.headerHeight.set(157.0F);
+      surface.imageOpacity.set(1.0F);
+      surface.imageScale.set(1.1F);
+      surface.imageX.set(0.6F);
+      surface.imageY.set(0.55F);
+   }
+
+   private void installBanner() {
+      if ("donutbets-banner.png".equals(this.cards.image.get())) {
+         Path target = backgroundsDir().resolve("donutbets-banner.png");
+         if (!Files.isRegularFile(target)) {
+            try (InputStream in = ThemeStore.class.getResourceAsStream("/assets/anubis/textures/gui/donutbets_banner.png")) {
+               if (in != null) {
+                  Files.createDirectories(target.getParent());
+                  Files.copy(in, target);
+               }
+            } catch (IOException e) {
+               LOGGER.warn("[Anubis] Could not install the default card banner", e);
+            }
+         }
+      }
+   }
+
    public synchronized void save() {
       if (!this.readOnly && this.loaded) {
          JsonObject root = new JsonObject();
-         root.addProperty("version", 3);
+         root.addProperty("version", 4);
          root.add("values", snapshot(this.settings, true));
          Path path = this.configPath();
 

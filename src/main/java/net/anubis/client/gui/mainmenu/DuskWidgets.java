@@ -69,10 +69,6 @@ public final class DuskWidgets {
       this.clips.clear();
    }
 
-   public void setBlocked(boolean blocked) {
-      this.blocked = blocked;
-   }
-
    public void end() {
       while (!this.openAreas.isEmpty()) {
          this.openAreas.pop();
@@ -304,11 +300,6 @@ public final class DuskWidgets {
             thumb[2]
          );
       }
-   }
-
-   public void setScroll(Object key, float offset) {
-      DuskWidgets.Scroll area = this.scrolls.computeIfAbsent(key, k -> new DuskWidgets.Scroll());
-      area.offset = area.target = offset;
    }
 
    public void pushClip(float x0, float y0, float x1, float y1) {

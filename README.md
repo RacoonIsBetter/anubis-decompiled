@@ -1,4 +1,4 @@
-# Anubis 0.9.9.1 (decompiled)
+# Anubis 1.0 (decompiled)
 
 > **Unofficial.** This is a decompiled and rebuilt copy of Anubis, a Fabric mod written by
 > **4ldenz**. It is not affiliated with or endorsed by the original author. Anubis is licensed
@@ -6,13 +6,17 @@
 > The original source repository (https://github.com/4ldenz/Anubis-client) is no longer
 > available.
 
-Decompiled from `Anubis Beta 0.9.9.1.jar` (Fabric, Minecraft 1.21.11).
+Decompiled from `Anubis Client 1.0.jar` (Fabric, Minecraft 1.21.11,
+SHA-256 `e60968d360d57e8cfcd68bb127f6f56c7801ddebcff331827102596a209b15f1`).
+The previous release, 0.9.9.1, is in this repository's history.
 
-- Decompiler: Vineflower 1.12.0. `SeedWorldgen.emptyLevel`'s lambda failed in Vineflower
-  and was recovered with CFR 0.152, then checked against the bytecode by hand.
+- Remapped from intermediary to Yarn with tiny-remapper 0.13.0 and its mixin extension, so
+  mixin targets are Yarn names too. Decompiled with Vineflower 1.12.0.
+- 465 source files whose classes are byte-identical to 0.9.9.1 reuse that release's
+  hand-fixed sources. The rest are new or changed in 1.0 and were fixed as described below.
 - Build setup mirrors the original jar's manifest: Gradle 9.4.1, Loom 1.16.3, Loader 0.19.2.
-  The exact Fabric API module, imgui-java 1.90.0 and Netty 4.2.7 versions from the
-  original `META-INF/jars` are pulled from Maven and bundled with `include`.
+  The exact Fabric API module and imgui-java 1.90.0 versions from the original
+  `META-INF/jars` are pulled from Maven and bundled with `include`.
 
 ## Building
 
@@ -22,32 +26,39 @@ Needs a JDK 21+ (the code targets Java 21).
 gradlew.bat build
 ```
 
-Output: `build/libs/anubis-0.9.9.1+mc1.21.11.jar`.
+Output: `build/libs/anubis-1.0+mc1.21.11.jar`. `gradlew.bat runClient` starts a dev client
+(it adds the full Fabric API, which 1.0 declares as a dependency).
+
+## What changed in 1.0 (from the jar)
+
+- Added: Easy Place / schematic builder (works with Litematica), tunnel and area miners,
+  elytra autopilot, crystal and sword bots, waypoints, Light ESP, Better Sus Chunk, Media Base
+  Finder, Anti Ghost Block, a DonutBets event feed, Pay Guard and a startup build check.
+- Removed: the account switcher and proxies (now a separate "Anubis Accounts" add-on), Player
+  Bypass 2, Quantum, Prime Chunk Finder, Speed Mine, Riptide, and the Android support files.
+- `SECURITY.md` (shipped in the jar, kept in `src/main/resources`) is the author's own
+  description of the build check, Pay Guard, webhooks and the DonutBets feed.
 
 ## Notes
 
-- **Minecraft names are Yarn** (`1.21.11+build.6`). The shipped jar used intermediary
-  names (`class_1234`, `method_5678`); every one was translated with Yarn's official table.
-  Mixin method selectors got full descriptors so overloaded Yarn names stay unambiguous.
-  `method_76304` (in `MixinAtmosphereRainFog`) has no Yarn name and is intentionally kept.
-  Eight Minecraft classes whose Yarn name clashed with another name in the same file
-  (`Feature`, `Type`, `Entry`, `Unbaked`) are written fully qualified.
-- The code needs Fabric API's `fabric-transitive-access-wideners-v1` (protected/private
-  Minecraft members), which the original jar did not bundle, so players need Fabric API.
-- Hand fixes after decompiling: mixin self-casts got `(Object)` (`(Entity)(Object)this`),
-  generic lambdas became method references, two mangled try-with-resources blocks in
-  `CustomGlintModule` and a rethrow in `EventBus` were rewritten.
-- **Bug in the shipped jar:** `CharacterLayer.submit`, `PharaohHeaddressLayer.submit` and
-  `SeedWorldgen`'s `getId`/`byId` kept Mojang names, so they never overrode Minecraft's
-  methods. They are now `render`, `getRawId` and `get`, which is what the author intended.
+- **Minecraft names are Yarn** (`1.21.11+build.6`). `method_76304` (in
+  `MixinAtmosphereRainFog`) has no Yarn name and is intentionally kept.
+- Easy Place calls Litematica's `WorldSchematic`, which tiny-remapper could not see, so
+  `method_8320/8321/8652` were renamed by hand to `getBlockState`, `getBlockEntity` and
+  `setBlockState`. Litematica 0.26.14 and MaLiLib 0.27.19 (the newest 1.21.11 builds made with
+  Loom 1.16.3) are compile-only dependencies; at runtime Litematica stays optional.
+- Hand fixes after decompiling: mixin self-casts got `(Object)` (`(Entity)(Object)this`), two
+  generic lambdas became `this::addSetting`, duplicate local names Vineflower put in one
+  `switch` scope were renamed (`Breaker`, `Bridger`, `BuildScan`), and a raw `Property` in
+  `BuildOrder.railShape` got its type.
+- The startup build check (`security/OfficialBuild`) compares the jar's signature with the
+  certificate fingerprint in `BuildConfig.SIGN_CERT_PARTS`. That array is emptied here (the
+  official value is kept in a comment), which is how the check treats an unsigned local build:
+  otherwise every jar built from this source would be stopped as "modified".
 - Mixins live in `com.example.client.mixin` (the original package) and are statically
   remapped, as in the original build (no refmap).
-- `src/main/resources/net/anubis/compat/android-picker/` (`classes.dex` +
-  `libanubis_picker.so`) and `io/imgui/java/native-bin/android-arm64/` are prebuilt
-  Android-only binaries carried over as-is; there is no source for them here.
-- Two lambdas were reported as "processed twice" by Vineflower
-  (`ConnectionsPanel.importFile`, `AuctionHouse.listSome`). They decompiled, but are the
-  first places to look if the compiler complains.
+- `SeedWorldgen.emptyLevel`'s lambda fails in Vineflower; its class is unchanged since 0.9.9.1,
+  so the CFR-recovered version from that release is used.
 
 ## Base Finder (`anubis-modded` branch)
 
@@ -60,7 +71,7 @@ Each loaded chunk gets a probability from independent signals:
 | Signal | What it means |
 |---|---|
 | Player underground | Another player is (or recently was) well below the surface here |
-| Hidden player activity | A player you can't see, at any depth: the server reports someone mining a block but never sent you that player, or blocks keep being dug/placed/used (doors, trapdoors, gates, barrels, levers) underground with no visible player within 8 blocks (explosions, fluids, falling blocks and growth are ignored). In the overworld also Player Bypass 2's inference: chunks outside your simulation distance keep ticking, or a hidden player hit a mob / picked up an item. Toggle **Hidden Players** |
+| Hidden player activity | A player you can't see, at any depth: the server reports someone mining a block but never sent you that player, or blocks keep being dug/placed/used (doors, trapdoors, gates, barrels, levers) underground with no visible player within 8 blocks (explosions, fluids, falling blocks and growth are ignored). In the overworld also Player Bypass's inference: chunks outside your simulation distance keep ticking, or a hidden player hit a mob / picked up an item. Toggle **Hidden Players** |
 | Player storage | Shulkers, ender chests, buried chests/barrels (lone ones on the surface count once, so scattered junk doesn't inflate a chunk) |
 | Surface build | Concrete, stained glass, quartz or metal blocks lined up 3+ in a row above ground (walls, floors, pillars); single scattered blocks are ignored |
 | Item frames / armor stands | Item frames, glow frames, armor stands and paintings (only players place these) |

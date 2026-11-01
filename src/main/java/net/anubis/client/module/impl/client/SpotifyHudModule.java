@@ -2,6 +2,7 @@ package net.anubis.client.module.impl.client;
 
 import com.sun.jna.Platform;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -9,11 +10,13 @@ import java.util.concurrent.TimeUnit;
 import net.anubis.client.chat.ModuleChat;
 import net.anubis.client.event.Stage;
 import net.anubis.client.event.impl.TickEvent;
+import net.anubis.client.gui.ThemeTint;
 import net.anubis.client.input.AnubisKeyPolling;
 import net.anubis.client.input.ModuleKeybinds;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.ModuleRegistry;
+import net.anubis.client.module.impl.render.PinkWater;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.KeySetting;
@@ -25,6 +28,7 @@ import net.anubis.client.util.spotify.LyricsQuery;
 import net.anubis.client.util.spotify.LyricsService;
 import net.anubis.client.util.spotify.MediaSession;
 import net.anubis.client.util.spotify.NowPlaying;
+import net.anubis.client.util.spotify.PlayerSource;
 import net.anubis.client.util.spotify.SpotifyWindow;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -37,6 +41,8 @@ import org.slf4j.LoggerFactory;
 public final class SpotifyHudModule extends ClientModule {
    private static final Logger LOGGER = LoggerFactory.getLogger("Anubis");
    private static final long POLL_INTERVAL_MS = 500L;
+   private static final float TINT_STEP_IN = 0.016666668F;
+   private static final float TINT_STEP_OUT = 0.033333335F;
    private static final long WINDOW_POLL_MS = 1000L;
    private static final long REPOLL_AFTER_KEY_MS = 250L;
    private static final long KEY_COOLDOWN_MS = 200L;
@@ -53,6 +59,25 @@ public final class SpotifyHudModule extends ClientModule {
    private final ModeSetting lyricMotion = this.addSetting("lyric-motion", new ModeSetting("Lyric Motion", "Wave", "Wave", "Glide", "Fade"));
    private final ModeSetting lyricHighlight = this.addSetting("lyric-highlight", new ModeSetting("Lyric Highlight", "Karaoke", "Karaoke", "Line", "Off"));
    private final BooleanSetting lyricsOnline = this.addSetting("lyrics-online", new BooleanSetting("Lyrics Online", true));
+   private final BooleanSetting skyLyrics = this.addSetting("sky-lyrics", new BooleanSetting("Sky Lyrics", true));
+   private final BooleanSetting skyTitle = this.addSetting("sky-title", new BooleanSetting("Sky Song Title", false));
+   private final BooleanSetting skyEmojis = this.addSetting("sky-emojis", new BooleanSetting("Sky Emojis", true));
+   private final ModeSetting skyEmojiStyle = this.addSetting(
+      "sky-emoji-style", new ModeSetting("Sky Emoji Style", "Behind", "Beside", "Behind", "Replace Word")
+   );
+   private final BooleanSetting skyFollow = this.addSetting("sky-follow", new BooleanSetting("Sky Follows View", true));
+   private final NumberSetting skyHeight = this.addSetting("sky-height", new NumberSetting("Sky Height", 10.0F, 10.0F, 70.0F).step(1.0F));
+   private final NumberSetting skySize = this.addSetting("sky-size", new NumberSetting("Sky Text Size", 1.25F, 0.3F, 3.0F).step(0.05F));
+   private final NumberSetting skyTitleSize = this.addSetting("sky-title-size", new NumberSetting("Sky Title Size", 1.0F, 0.3F, 3.0F).step(0.05F));
+   private final NumberSetting skyEmojiSize = this.addSetting("sky-emoji-size", new NumberSetting("Sky Emoji Size", 1.35F, 0.3F, 3.0F).step(0.05F));
+   private final NumberSetting skyOpacity = this.addSetting("sky-opacity", new NumberSetting("Sky Opacity", 0.9F, 0.1F, 1.0F).step(0.05F));
+   private final ColorSetting skyTextColor = this.addSetting("sky-text-color", new ColorSetting("Sky Text Color", -1));
+   private final ColorSetting skyTitleColor = this.addSetting("sky-title-color", new ColorSetting("Sky Title Color", -1447442));
+   private final BooleanSetting skyGlowAtmosphere = this.addSetting("sky-glow-atmosphere", new BooleanSetting("Sky Glow From Atmosphere", true));
+   private final ColorSetting skyGlowColor = this.addSetting("sky-glow-color", new ColorSetting("Sky Glow Color", -7713281));
+   private final NumberSetting skyGlow = this.addSetting("sky-glow", new NumberSetting("Sky Glow", 0.8F, 0.0F, 1.0F).step(0.05F));
+   private final BooleanSetting easterEggs = this.addSetting("easter-eggs", new BooleanSetting("Easter Eggs", true));
+   private final ModeSetting pinkWater = this.addSetting("pink-water", new ModeSetting("Pink Water", PinkWater.Design.DEFAULT.label(), PinkWater.modes()));
    private final NumberSetting cardWidth = this.addSetting("card-width", new NumberSetting("Card Width", 320.0F, 200.0F, 560.0F).step(1.0F));
    private final ColorSetting titleColor = this.addSetting("title-color", new ColorSetting("Title Color", -1447442));
    private final ColorSetting artistColor = this.addSetting("artist-color", new ColorSetting("Artist Color", -6052949));
@@ -86,12 +111,28 @@ public final class SpotifyHudModule extends ClientModule {
       this.lyricMotion.visibleWhen(this.showLyrics::get);
       this.lyricHighlight.visibleWhen(this.showLyrics::get);
       this.lyricsOnline.visibleWhen(this.showLyrics::get);
+      this.skyLyrics.visibleWhen(this.showLyrics::get);
+      this.skyTitle.visibleWhen(this::skyLyrics);
+      this.skyEmojis.visibleWhen(this::skyLyrics);
+      this.skyFollow.visibleWhen(this::skyLyrics);
+      this.skyHeight.visibleWhen(this::skyLyrics);
+      this.skySize.visibleWhen(this::skyLyrics);
+      this.skyTitleSize.visibleWhen(() -> this.skyLyrics() && this.skyTitle.get());
+      this.skyEmojiStyle.visibleWhen(() -> this.skyLyrics() && this.skyEmojis.get());
+      this.skyEmojiSize.visibleWhen(() -> this.skyLyrics() && this.skyEmojis.get());
+      this.skyOpacity.visibleWhen(this::skyLyrics);
+      this.skyTextColor.visibleWhen(this::skyLyrics);
+      this.skyTitleColor.visibleWhen(() -> this.skyLyrics() && this.skyTitle.get());
+      this.skyGlowAtmosphere.visibleWhen(this::skyLyrics);
+      this.skyGlowColor.visibleWhen(this::skyLyrics);
+      this.skyGlow.visibleWhen(this::skyLyrics);
       this.lyricsOnline.onChange(() -> {
          SpotifyHudModule.Poller running = this.poller;
          if (running != null) {
             running.lyricsService.setOnline(this.lyricsOnline.get());
          }
       });
+      this.pinkWater.visibleWhen(this.easterEggs::get);
       this.playPauseKey.visibleWhen(this.mediaKeys::get);
       this.nextKey.visibleWhen(this.mediaKeys::get);
       this.previousKey.visibleWhen(this.mediaKeys::get);
@@ -100,13 +141,13 @@ public final class SpotifyHudModule extends ClientModule {
    @Override
    protected void onEnable() {
       Arrays.fill(this.wasDown, true);
-      if (!Platform.isWindows()) {
+      if (!PlayerSource.supported()) {
          synchronized (this.publishLock) {
             this.nowPlaying = NowPlaying.UNSUPPORTED;
             this.lyrics = null;
          }
 
-         ModuleChat.send(this, ModuleChat.body().danger("Not supported").text(", only the Spotify app on Windows works"));
+         ModuleChat.send(this, ModuleChat.body().danger("Not supported").text(", only the Spotify app on Windows, macOS and Linux works"));
       } else {
          SpotifyHudModule.Poller started = new SpotifyHudModule.Poller();
          synchronized (this.publishLock) {
@@ -122,11 +163,13 @@ public final class SpotifyHudModule extends ClientModule {
 
    @Override
    protected void onDisable() {
+      ThemeTint.pink(0.0F);
+      PinkWater.reset(MinecraftClient.getInstance());
       SpotifyHudModule.Poller stopped;
       synchronized (this.publishLock) {
          stopped = this.poller;
          this.poller = null;
-         this.nowPlaying = Platform.isWindows() ? NowPlaying.WAITING : NowPlaying.UNSUPPORTED;
+         this.nowPlaying = PlayerSource.supported() ? NowPlaying.WAITING : NowPlaying.UNSUPPORTED;
          this.lyrics = null;
       }
 
@@ -208,6 +251,83 @@ public final class SpotifyHudModule extends ClientModule {
       return this.showLyrics.get();
    }
 
+   public boolean skyLyrics() {
+      return this.showLyrics.get() && this.skyLyrics.get();
+   }
+
+   public boolean skyTitle() {
+      return this.skyTitle.get();
+   }
+
+   public boolean skyEmojis() {
+      return this.skyEmojis.get();
+   }
+
+   public SpotifyHudModule.SkyEmojiStyle skyEmojiStyle() {
+      return switch (this.skyEmojiStyle.get()) {
+         case "Behind" -> SpotifyHudModule.SkyEmojiStyle.BEHIND;
+         case "Replace Word" -> SpotifyHudModule.SkyEmojiStyle.REPLACE_WORD;
+         default -> SpotifyHudModule.SkyEmojiStyle.BESIDE;
+      };
+   }
+
+   public boolean skyFollow() {
+      return this.skyFollow.get();
+   }
+
+   public float skyHeight() {
+      return this.skyHeight.get();
+   }
+
+   public float skySize() {
+      return this.skySize.get();
+   }
+
+   public float skyTitleSize() {
+      return this.skyTitleSize.get();
+   }
+
+   public float skyEmojiSize() {
+      return this.skyEmojiSize.get();
+   }
+
+   public float skyOpacity() {
+      return this.skyOpacity.get();
+   }
+
+   public int skyTextColor() {
+      return this.skyTextColor.argb();
+   }
+
+   public int skyTitleColor() {
+      return this.skyTitleColor.argb();
+   }
+
+   public boolean skyGlowAtmosphere() {
+      return this.skyGlowAtmosphere.get();
+   }
+
+   public int skyGlowColor() {
+      return this.skyGlowColor.argb();
+   }
+
+   public boolean peepPlaying() {
+      NowPlaying now = this.nowPlaying;
+      return this.easterEggs.get()
+         && now != null
+         && now.playing()
+         && now.artist() != null
+         && now.artist().toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "").contains("lilpeep");
+   }
+
+   public PinkWater.Design pinkWaterDesign() {
+      return this.easterEggs.get() ? PinkWater.Design.byLabel(this.pinkWater.get()) : null;
+   }
+
+   public float skyGlow() {
+      return this.skyGlow.get();
+   }
+
    public int lyricLines() {
       try {
          return Math.max(1, Math.min(3, Integer.parseInt(this.lyricLines.get())));
@@ -262,6 +382,10 @@ public final class SpotifyHudModule extends ClientModule {
 
    private void onTick(TickEvent event) {
       MinecraftClient mc = MinecraftClient.getInstance();
+      float tint = ThemeTint.pink();
+      boolean peep = this.peepPlaying();
+      ThemeTint.pink(peep ? tint + 0.016666668F : tint - 0.033333335F);
+      PinkWater.tick(mc, peep, this.pinkWaterDesign());
       boolean accept = this.mediaKeys.get() && mc.currentScreen == null && mc.isWindowFocused() && mc.player != null;
 
       for (int i = 0; i < this.keys.length; i++) {
@@ -317,7 +441,7 @@ public final class SpotifyHudModule extends ClientModule {
    private final class Poller {
       final ScheduledThreadPoolExecutor executor;
       final LyricsService lyricsService = new LyricsService();
-      private MediaSession media;
+      private PlayerSource media;
       private boolean mediaFailed;
       private SpotifyWindow window;
       private boolean windowFailed;
@@ -408,7 +532,7 @@ public final class SpotifyHudModule extends ClientModule {
 
          if (this.media == null) {
             try {
-               this.media = MediaSession.spotify();
+               this.media = PlayerSource.spotify();
             } catch (LinkageError failure) {
                SpotifyHudModule.LOGGER.warn("[Anubis] Spotify HUD: media session unavailable ({})", failure.toString());
                this.mediaFailed = true;
@@ -456,28 +580,37 @@ public final class SpotifyHudModule extends ClientModule {
       }
 
       private NowPlaying readWindow() {
-         if (!this.windowFailed && this.window == null) {
-            try {
-               this.window = new SpotifyWindow();
-            } catch (LinkageError failure) {
-               this.windowFailed(failure);
+         if (!Platform.isWindows()) {
+            if (this.media != null && !this.mediaFailed && !this.media.isUnsupported()) {
+               return NowPlaying.NOT_RUNNING;
             }
-         }
 
-         if (this.window != null) {
-            try {
-               return NowPlaying.fromWindowTitle(this.window.readTitle(), SpotifyHudModule.this.nowPlaying);
-            } catch (LinkageError failure) {
-               this.windowFailed(failure);
+            this.executor.shutdown();
+            return NowPlaying.UNSUPPORTED;
+         } else {
+            if (!this.windowFailed && this.window == null) {
+               try {
+                  this.window = new SpotifyWindow();
+               } catch (LinkageError failure) {
+                  this.windowFailed(failure);
+               }
             }
-         }
 
-         if (this.media != null && !this.mediaFailed && !this.media.isUnsupported()) {
-            return NowPlaying.NOT_RUNNING;
-         }
+            if (this.window != null) {
+               try {
+                  return NowPlaying.fromWindowTitle(this.window.readTitle(), SpotifyHudModule.this.nowPlaying);
+               } catch (LinkageError failure) {
+                  this.windowFailed(failure);
+               }
+            }
 
-         this.executor.shutdown();
-         return NowPlaying.UNSUPPORTED;
+            if (this.media != null && !this.mediaFailed && !this.media.isUnsupported()) {
+               return NowPlaying.NOT_RUNNING;
+            }
+
+            this.executor.shutdown();
+            return NowPlaying.UNSUPPORTED;
+         }
       }
 
       private void windowFailed(LinkageError failure) {
@@ -536,10 +669,12 @@ public final class SpotifyHudModule extends ClientModule {
                SpotifyHudModule.LOGGER.debug("[Anubis] Spotify HUD: media session control failed ({}); sending the media key", this.media.lastError());
             }
 
-            try {
-               SpotifyWindow.tap(key);
-            } catch (LinkageError | RuntimeException failure) {
-               SpotifyHudModule.LOGGER.debug("[Anubis] Spotify HUD media key failed", failure);
+            if (Platform.isWindows()) {
+               try {
+                  SpotifyWindow.tap(key);
+               } catch (LinkageError | RuntimeException failure) {
+                  SpotifyHudModule.LOGGER.debug("[Anubis] Spotify HUD media key failed", failure);
+               }
             }
          }
       }
@@ -554,6 +689,13 @@ public final class SpotifyHudModule extends ClientModule {
             }
          }
       }
+   }
+
+   @Environment(EnvType.CLIENT)
+   public enum SkyEmojiStyle {
+      BESIDE,
+      BEHIND,
+      REPLACE_WORD;
    }
 
    @Environment(EnvType.CLIENT)

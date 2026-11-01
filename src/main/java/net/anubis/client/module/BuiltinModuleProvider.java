@@ -1,6 +1,11 @@
 package net.anubis.client.module;
 
+import java.util.ArrayList;
 import java.util.List;
+import net.anubis.client.easyplace.EasyPlaceModules;
+import net.anubis.client.easyplace.builder.AreaMinerModule;
+import net.anubis.client.easyplace.builder.ElytraAutopilotModule;
+import net.anubis.client.easyplace.builder.TunnelMinerModule;
 import net.anubis.client.module.impl.client.HotkeysModule;
 import net.anubis.client.module.impl.client.HudModule;
 import net.anubis.client.module.impl.client.PerformanceModule;
@@ -12,21 +17,26 @@ import net.anubis.client.module.impl.combat.AnchorAuraModule;
 import net.anubis.client.module.impl.combat.AutoCityModule;
 import net.anubis.client.module.impl.combat.AutoInvTotemModule;
 import net.anubis.client.module.impl.combat.AutoTotemModule;
+import net.anubis.client.module.impl.combat.AutoTrapModule;
 import net.anubis.client.module.impl.combat.CrystalAuraModule;
 import net.anubis.client.module.impl.combat.CrystalMacroModule;
 import net.anubis.client.module.impl.combat.CrystalOptimizerModule;
+import net.anubis.client.module.impl.combat.FakeLagModule;
 import net.anubis.client.module.impl.combat.FastXpModule;
 import net.anubis.client.module.impl.combat.FriendGuardModule;
 import net.anubis.client.module.impl.combat.HoverTotemModule;
 import net.anubis.client.module.impl.combat.JumpResetModule;
 import net.anubis.client.module.impl.combat.KeyThrowModule;
 import net.anubis.client.module.impl.combat.KillAuraModule;
+import net.anubis.client.module.impl.combat.KnockbackDelayModule;
 import net.anubis.client.module.impl.combat.MaceModule;
 import net.anubis.client.module.impl.combat.ShieldBreakerModule;
 import net.anubis.client.module.impl.combat.SingleAnchorMacroModule;
 import net.anubis.client.module.impl.combat.SpearLungeModule;
 import net.anubis.client.module.impl.combat.TriggerbotModule;
 import net.anubis.client.module.impl.combat.WTapRecodeModule;
+import net.anubis.client.module.impl.combat.bot.CrystalBotModule;
+import net.anubis.client.module.impl.combat.bot.SwordBotModule;
 import net.anubis.client.module.impl.donutmacros.AhSellModule;
 import net.anubis.client.module.impl.donutmacros.AhSniperModule;
 import net.anubis.client.module.impl.donutmacros.AutoSellModule;
@@ -37,13 +47,13 @@ import net.anubis.client.module.impl.donutmacros.PanicPayModule;
 import net.anubis.client.module.impl.donutmacros.TpMacroModule;
 import net.anubis.client.module.impl.misc.AirStuckModule;
 import net.anubis.client.module.impl.misc.AmethystBypassModule;
+import net.anubis.client.module.impl.misc.AntiGhostBlockModule;
 import net.anubis.client.module.impl.misc.AntiTrapModule;
 import net.anubis.client.module.impl.misc.AntiVanishModule;
 import net.anubis.client.module.impl.misc.AutoClickerModule;
 import net.anubis.client.module.impl.misc.AutoEatModule;
 import net.anubis.client.module.impl.misc.AutoReconnectModule;
 import net.anubis.client.module.impl.misc.AutoRelogModule;
-import net.anubis.client.module.impl.misc.AutoReplenishModule;
 import net.anubis.client.module.impl.misc.BlockNotifierModule;
 import net.anubis.client.module.impl.misc.ChatMacroModule;
 import net.anubis.client.module.impl.misc.CoordSnapperModule;
@@ -52,22 +62,20 @@ import net.anubis.client.module.impl.misc.DonutNoFallModule;
 import net.anubis.client.module.impl.misc.FakeStats;
 import net.anubis.client.module.impl.misc.FastUseModule;
 import net.anubis.client.module.impl.misc.FreecamModule;
-import net.anubis.client.module.impl.misc.HomeMetaModule;
+import net.anubis.client.module.impl.misc.GoliathRtpModule;
 import net.anubis.client.module.impl.misc.LegitAutoToolModule;
+import net.anubis.client.module.impl.misc.MediaBaseFinderModule;
 import net.anubis.client.module.impl.misc.NameProtectModule;
 import net.anubis.client.module.impl.misc.NetheriteFinderModule;
 import net.anubis.client.module.impl.misc.NoInvLeakModule;
-import net.anubis.client.module.impl.misc.PlayerBypass2Module;
 import net.anubis.client.module.impl.misc.PlayerBypassModule;
 import net.anubis.client.module.impl.misc.PlayerDetectionModule;
-import net.anubis.client.module.impl.misc.QuantumModule;
-import net.anubis.client.module.impl.misc.RenderDistanceToggleModule;
 import net.anubis.client.module.impl.misc.SkinChangeModule;
 import net.anubis.client.module.impl.misc.SlowSwingModule;
 import net.anubis.client.module.impl.misc.SpamModule;
 import net.anubis.client.module.impl.misc.SpawnerProtectModule;
-import net.anubis.client.module.impl.misc.SpeedMineModule;
 import net.anubis.client.module.impl.misc.StaffListModule;
+import net.anubis.client.module.impl.misc.StaffLiveModule;
 import net.anubis.client.module.impl.misc.TridentUtilModule;
 import net.anubis.client.module.impl.misc.WeatherNotifierModule;
 import net.anubis.client.module.impl.movement.AutoJumpModule;
@@ -88,10 +96,11 @@ import net.anubis.client.module.impl.movement.SpiderModule;
 import net.anubis.client.module.impl.movement.SprintModule;
 import net.anubis.client.module.impl.movement.TridentBoostModule;
 import net.anubis.client.module.impl.render.AtmosphereModule;
+import net.anubis.client.module.impl.render.BaseFinderModule;
+import net.anubis.client.module.impl.render.BetterSusChunkModule;
 import net.anubis.client.module.impl.render.BlockEntityDebugModule;
 import net.anubis.client.module.impl.render.BlockEspModule;
 import net.anubis.client.module.impl.render.BlockOverlayModule;
-import net.anubis.client.module.impl.render.BaseFinderModule;
 import net.anubis.client.module.impl.render.ChunkScannerModule;
 import net.anubis.client.module.impl.render.ColorGradingModule;
 import net.anubis.client.module.impl.render.CustomCrosshairModule;
@@ -115,7 +124,6 @@ import net.anubis.client.module.impl.render.NametagsModule;
 import net.anubis.client.module.impl.render.NoRenderModule;
 import net.anubis.client.module.impl.render.PearlTrajectoryModule;
 import net.anubis.client.module.impl.render.PharaohHeaddressModule;
-import net.anubis.client.module.impl.render.PrimeChunkFinderModule;
 import net.anubis.client.module.impl.render.RelicParticlesModule;
 import net.anubis.client.module.impl.render.ShaderEspModule;
 import net.anubis.client.module.impl.render.SpawnerNametagsModule;
@@ -128,6 +136,7 @@ import net.anubis.client.module.impl.render.TimeChangerModule;
 import net.anubis.client.module.impl.render.TotemSpiritModule;
 import net.anubis.client.module.impl.render.TracersModule;
 import net.anubis.client.module.impl.render.TrajectoriesModule;
+import net.anubis.client.module.impl.render.WaypointsModule;
 import net.anubis.client.module.impl.render.WeaponInspectModule;
 import net.anubis.client.module.impl.render.XrayModule;
 import net.anubis.client.module.impl.render.ZoomModule;
@@ -144,138 +153,152 @@ public final class BuiltinModuleProvider implements ModuleProvider {
 
    @Override
    public List<ClientModule> createModules() {
-      return List.of(
-         new AimAssistModule(),
-         new SingleAnchorMacroModule(),
-         new AnchorAuraModule(),
-         new CrystalMacroModule(),
-         new CrystalAuraModule(),
-         new AutoCityModule(),
-         new TriggerbotModule(),
-         new KillAuraModule(),
-         new ShieldBreakerModule(),
-         new MaceModule(),
-         new HoverTotemModule(),
-         new FastXpModule(),
-         new AutoTotemModule(),
-         new AutoInvTotemModule(),
-         new WTapRecodeModule(),
-         new CrystalOptimizerModule(),
-         new FriendGuardModule(),
-         new SpearLungeModule(),
-         new JumpResetModule(),
-         new KeyThrowModule(),
-         new LegitAutoToolModule(),
-         new AutoClickerModule(),
-         new FastUseModule(),
-         new AutoEatModule(),
-         new AutoReplenishModule(),
-         new AutoReconnectModule(),
-         new AntiVanishModule(),
-         new PlayerDetectionModule(),
-         new AutoRelogModule(),
-         new AntiTrapModule(),
-         new AirStuckModule(),
-         new SpawnerProtectModule(),
-         new StaffListModule(),
-         new PlayerBypassModule(),
-         new PlayerBypass2Module(),
-         new NetheriteFinderModule(),
-         new RenderDistanceToggleModule(),
-         new HomeMetaModule(),
-         new TridentUtilModule(),
-         new QuantumModule(),
-         new DonutNoFallModule(),
-         new SpeedMineModule(),
-         new AmethystBypassModule(),
-         new FreecamModule(),
-         new SpamModule(),
-         new CoordSnapperModule(),
-         new ChatMacroModule(),
-         new NameProtectModule(),
-         new NoInvLeakModule(),
-         new FakeStats(),
-         new WeatherNotifierModule(),
-         new BlockNotifierModule(),
-         new FlyModule(),
-         new AutoWalkModule(),
-         new AutoJumpModule(),
-         new ClickTpModule(),
-         new BoatFlyModule(),
-         new BoatNoclipModule(),
-         new ElytraFlyModule(),
-         new ElytraSwapModule(),
-         new EntityControlModule(),
-         new EntitySpeedModule(),
-         new JesusModule(),
-         new SneakModule(),
-         new SpeedModule(),
-         new SpiderModule(),
-         new SprintModule(),
-         new NoJumpDelayModule(),
-         new TridentBoostModule(),
-         new SlowSwingModule(),
-         new SwingAnimationModule(),
-         new WeaponInspectModule(),
-         new HandModelModule(),
-         new HandsModule(),
-         new HandAuraModule(),
-         new SkinChangeModule(),
-         new SpawnerNotifierModule(),
-         new SusChunkFinderModule(),
-         new BaseFinderModule(),
-         new ChunkScannerModule(),
-         new PrimeChunkFinderModule(),
-         new BlockEntityDebugModule(),
-         new LightEspModule(),
-         new FullbrightModule(),
-         new EspModule(),
-         new ShaderEspModule(),
-         new NametagsModule(),
-         new SpawnerNametagsModule(),
-         new BlockEspModule(),
-         new BlockOverlayModule(),
-         new StorageEspModule(),
-         new FreelookModule(),
-         new HoleEspModule(),
-         new PearlTrajectoryModule(),
-         new TrajectoriesModule(),
-         new ItemEspModule(),
-         new XrayModule(),
-         new NoRenderModule(),
-         new CustomFovModule(),
-         new ZoomModule(),
-         new CustomCrosshairModule(),
-         new CustomGlintModule(),
-         new HitParticlesModule(),
-         new TargetEspModule(),
-         new TotemSpiritModule(),
-         new RelicParticlesModule(),
-         new MotionBlurModule(),
-         new AtmosphereModule(),
-         new ColorGradingModule(),
-         new JumpCirclesModule(),
-         new PharaohHeaddressModule(),
-         new CharacterModule(),
-         new FloatingRelicsModule(),
-         new TimeChangerModule(),
-         new LowHealthWarningModule(),
-         new HudModule(),
-         new SpotifyHudModule(),
-         new RegionMapModule(),
-         new RadarModule(),
-         new HotkeysModule(),
-         new TracersModule(),
-         new PerformanceModule(),
-         new DiscordPresenceModule(),
-         new AutoTpaHereModule(),
-         new OrderAhSellerModule(),
-         new AhSellModule(),
-         new AutoSellModule(),
-         new TpMacroModule(),
-         new OrderDropperModule(),
-         new PanicPayModule(),
-         new AhSniperModule()
+      List<ClientModule> modules = new ArrayList<>(
+         List.of(
+            new AimAssistModule(),
+            new SingleAnchorMacroModule(),
+            new AnchorAuraModule(),
+            new CrystalMacroModule(),
+            new CrystalAuraModule(),
+            new AutoCityModule(),
+            new TriggerbotModule(),
+            new KillAuraModule(),
+            new ShieldBreakerModule(),
+            new AutoTrapModule(),
+            new FakeLagModule(),
+            new KnockbackDelayModule(),
+            new SwordBotModule(),
+            new CrystalBotModule(),
+            new MaceModule(),
+            new HoverTotemModule(),
+            new FastXpModule(),
+            new AutoTotemModule(),
+            new AutoInvTotemModule(),
+            new WTapRecodeModule(),
+            new CrystalOptimizerModule(),
+            new FriendGuardModule(),
+            new SpearLungeModule(),
+            new JumpResetModule(),
+            new KeyThrowModule(),
+            new LegitAutoToolModule(),
+            new AutoClickerModule(),
+            new FastUseModule(),
+            new AutoEatModule(),
+            new AutoReconnectModule(),
+            new AntiVanishModule(),
+            new PlayerDetectionModule(),
+            new AutoRelogModule(),
+            new AntiTrapModule(),
+            new AirStuckModule(),
+            new SpawnerProtectModule(),
+            new StaffListModule(),
+            new PlayerBypassModule(),
+            new MediaBaseFinderModule(),
+            new TunnelMinerModule(),
+            new AreaMinerModule(),
+            new GoliathRtpModule(),
+            new StaffLiveModule(),
+            new NetheriteFinderModule(),
+            new TridentUtilModule(),
+            new DonutNoFallModule(),
+            new AntiGhostBlockModule(),
+            new AmethystBypassModule(),
+            new FreecamModule(),
+            new SpamModule(),
+            new CoordSnapperModule(),
+            new ChatMacroModule(),
+            new NameProtectModule(),
+            new NoInvLeakModule(),
+            new FakeStats(),
+            new WeatherNotifierModule(),
+            new BlockNotifierModule(),
+            new FlyModule(),
+            new AutoWalkModule(),
+            new AutoJumpModule(),
+            new ClickTpModule(),
+            new BoatFlyModule(),
+            new BoatNoclipModule(),
+            new ElytraFlyModule(),
+            new ElytraSwapModule(),
+            new ElytraAutopilotModule(),
+            new EntityControlModule(),
+            new EntitySpeedModule(),
+            new JesusModule(),
+            new SneakModule(),
+            new SpeedModule(),
+            new SpiderModule(),
+            new SprintModule(),
+            new NoJumpDelayModule(),
+            new TridentBoostModule(),
+            new SlowSwingModule(),
+            new SwingAnimationModule(),
+            new WeaponInspectModule(),
+            new HandModelModule(),
+            new HandsModule(),
+            new HandAuraModule(),
+            new SkinChangeModule(),
+            new SpawnerNotifierModule(),
+            new SusChunkFinderModule(),
+            new BetterSusChunkModule(),
+            new BaseFinderModule(),
+            new ChunkScannerModule(),
+            new BlockEntityDebugModule(),
+            new LightEspModule(),
+            new FullbrightModule(),
+            new EspModule(),
+            new ShaderEspModule(),
+            new NametagsModule(),
+            new WaypointsModule(),
+            new SpawnerNametagsModule(),
+            new BlockEspModule(),
+            new BlockOverlayModule(),
+            new StorageEspModule(),
+            new FreelookModule(),
+            new HoleEspModule(),
+            new PearlTrajectoryModule(),
+            new TrajectoriesModule(),
+            new ItemEspModule(),
+            new XrayModule(),
+            new NoRenderModule(),
+            new CustomFovModule(),
+            new ZoomModule(),
+            new CustomCrosshairModule(),
+            new CustomGlintModule(),
+            new HitParticlesModule(),
+            new TargetEspModule(),
+            new TotemSpiritModule(),
+            new RelicParticlesModule(),
+            new MotionBlurModule(),
+            new AtmosphereModule(),
+            new ColorGradingModule(),
+            new JumpCirclesModule(),
+            new PharaohHeaddressModule(),
+            new CharacterModule(),
+            new FloatingRelicsModule(),
+            new TimeChangerModule(),
+            new LowHealthWarningModule(),
+            new HudModule(),
+            new SpotifyHudModule(),
+            new RegionMapModule(),
+            new RadarModule(),
+            new HotkeysModule(),
+            new TracersModule(),
+            new PerformanceModule(),
+            new DiscordPresenceModule(),
+            new AutoTpaHereModule(),
+            new OrderAhSellerModule(),
+            new AhSellModule(),
+            new AutoSellModule(),
+            new TpMacroModule(),
+            new OrderDropperModule(),
+            new PanicPayModule(),
+            new AhSniperModule()
+         )
       );
+      if (EasyPlaceModules.available()) {
+         modules.addAll(EasyPlaceModules.create());
+      }
+
+      return modules;
    }
 }

@@ -5,17 +5,24 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import net.anubis.client.event.impl.ModuleToggleEvent;
 import net.anubis.client.input.ModuleKeybinds;
 import net.anubis.client.module.ClientModule;
@@ -35,6 +42,12 @@ public final class ModuleConfigStore {
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
    private static final int CONFIG_VERSION = 3;
    private static final long AUTOSAVE_DELAY_NANOS = 2000000000L;
+   private static final long SHUTDOWN_WRITE_WAIT_SECONDS = 10L;
+   private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(runnable -> {
+      Thread thread = new Thread(runnable, "Anubis config writer");
+      thread.setDaemon(true);
+      return thread;
+   });
    private static final Map<String, String> RENAMED_MODULES = Map.of("activity-bypass", "player-bypass", "Activity Bypass", "player-bypass");
    private final Map<String, JsonObject> orphanModules = new LinkedHashMap<>();
    private final Map<String, Boolean> pendingEnabled = new LinkedHashMap<>();
@@ -42,6 +55,8 @@ public final class ModuleConfigStore {
    private boolean readOnly;
    private final Map<String, JsonObject> retainedEntries = new LinkedHashMap<>();
    private String activeProfile;
+   private volatile boolean writeFailed;
+   private Future<?> lastWrite;
    private long savedRevision = -1L;
    private long observedRevision = -1L;
    private long observedAt;
@@ -71,20 +86,34 @@ public final class ModuleConfigStore {
 
    private void readConfig() {
       Path path = this.configPath();
+      deleteQuietly(tmpPath(path));
       if (Files.isRegularFile(path)) {
-         try (Reader reader = Files.newBufferedReader(path)) {
-            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-            this.applyConfigRoot(root);
-            if (root.has("activeProfile") && root.get("activeProfile").isJsonPrimitive()) {
-               this.activeProfile = root.get("activeProfile").getAsString();
-            }
+         try {
+            label87: {
+               try (Reader reader = Files.newBufferedReader(path)) {
+                  JsonElement parsed = JsonParser.parseReader(reader);
+                  if (parsed.isJsonObject()) {
+                     JsonObject root = parsed.getAsJsonObject();
+                     this.applyConfigRoot(root);
+                     if (root.has("activeProfile") && root.get("activeProfile").isJsonPrimitive()) {
+                        this.activeProfile = root.get("activeProfile").getAsString();
+                     }
 
-            int version = root.has("version") ? root.get("version").getAsInt() : 1;
-            if (!this.readOnly && version < 3) {
-               Path backup = path.resolveSibling(path.getFileName() + ".v" + version + ".bak");
-               if (!Files.exists(backup)) {
-                  Files.copy(path, backup);
+                     int version = root.has("version") ? root.get("version").getAsInt() : 1;
+                     if (!this.readOnly && version < 3) {
+                        Path backup = backupPath(path, version);
+                        if (!Files.exists(backup)) {
+                           writeJson(backup, withoutSettings(root, Setting::isSecret));
+                        }
+                     }
+                     break label87;
+                  }
+
+                  LOGGER.warn("[Anubis] Module config isn't a JSON object; preserving the file");
+                  this.readOnly = true;
                }
+
+               return;
             }
          } catch (IOException | RuntimeException e) {
             LOGGER.warn("[Anubis] Failed to load module config; preserving the file", e);
@@ -92,6 +121,90 @@ public final class ModuleConfigStore {
             this.pendingEnabled.clear();
             this.readOnly = true;
          }
+
+         if (!this.readOnly) {
+            scrubBackups(path);
+         }
+      }
+   }
+
+   private static Path backupPath(Path path, int version) {
+      return path.resolveSibling(path.getFileName() + ".v" + version + ".bak");
+   }
+
+   private static void scrubBackups(Path path) {
+      List<String> needles = new ArrayList<>();
+
+      for (ClientModule module : ModuleRegistry.all()) {
+         for (Setting setting : module.settings()) {
+            if (setting.isSecret()) {
+               needles.add("\"" + setting.id() + "\"");
+               needles.add("\"" + setting.name() + "\"");
+            }
+         }
+      }
+
+      for (int version = 0; version < 3; version++) {
+         Path backup = backupPath(path, version);
+         if (Files.isRegularFile(backup)) {
+            try {
+               String text = Files.readString(backup);
+               boolean mentioned = false;
+
+               for (String needle : needles) {
+                  mentioned |= text.contains(needle);
+               }
+
+               if (mentioned) {
+                  JsonElement parsed = JsonParser.parseString(text);
+                  if (parsed.isJsonObject()) {
+                     JsonObject cleaned = withoutSettings(parsed.getAsJsonObject(), Setting::isSecret);
+                     if (!cleaned.equals(parsed)) {
+                        writeJson(backup, cleaned);
+                     }
+                  }
+               }
+            } catch (IOException | RuntimeException e) {
+               LOGGER.warn("[Anubis] Couldn't clean {}", backup.getFileName(), e);
+            }
+         }
+      }
+   }
+
+   public static JsonObject withoutPrivateValues(JsonObject root) {
+      return withoutSettings(root, Setting::isPrivate);
+   }
+
+   private static JsonObject withoutSettings(JsonObject root, Predicate<Setting> drop) {
+      JsonObject copy = root.deepCopy();
+      if (!(copy.get("modules") instanceof JsonObject modules)) {
+         return copy;
+      } else {
+         HashMap var12 = new HashMap();
+
+         for (ClientModule module : ModuleRegistry.all()) {
+            var12.putIfAbsent(module.name(), module);
+         }
+
+         for (ClientModule module : ModuleRegistry.all()) {
+            var12.put(module.id(), module);
+         }
+
+         for (String key : List.copyOf(modules.keySet())) {
+            if (modules.get(key) instanceof JsonObject entry) {
+               String renamed = renamedModuleId(key);
+               ClientModule module = (ClientModule)var12.get(renamed != null ? renamed : key);
+               if (module == null && entry.get("name") instanceof JsonPrimitive name && name.isString()) {
+                  module = (ClientModule)var12.get(name.getAsString());
+               }
+
+               if (module != null) {
+                  modules.add(key, withoutSettings(module, entry, drop));
+               }
+            }
+         }
+
+         return copy;
       }
    }
 
@@ -116,6 +229,20 @@ public final class ModuleConfigStore {
    }
 
    public synchronized void save() {
+      this.write(false);
+   }
+
+   public synchronized void saveIfChanged() {
+      if (!this.loaded || this.readOnly || this.writeFailed || ModuleRevision.current() != this.savedRevision) {
+         this.write(false);
+      }
+   }
+
+   public synchronized void saveAndWait() {
+      this.write(true);
+   }
+
+   private void write(boolean wait) {
       this.ensureLoaded();
       if (!this.readOnly) {
          long revision = ModuleRevision.current();
@@ -125,33 +252,77 @@ public final class ModuleConfigStore {
          }
 
          Path path = this.configPath();
+         this.writeFailed = false;
+         this.savedRevision = revision;
 
          try {
-            Files.createDirectories(path.getParent());
-            Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
+            this.lastWrite = WRITER.submit(() -> {
+               try {
+                  Files.createDirectories(path.getParent());
+                  writeJson(path, root);
+               } catch (IOException | RuntimeException e) {
+                  this.writeFailed = true;
+                  LOGGER.warn("[Anubis] Failed to save module config", e);
+               }
+            });
+         } catch (RuntimeException rejected) {
+            this.writeFailed = true;
+            return;
+         }
 
-            try (Writer writer = Files.newBufferedWriter(tmp)) {
-               GSON.toJson(root, writer);
-            }
-
+         if (wait) {
             try {
-               Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException atomicFail) {
-               Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+               this.lastWrite.get(10L, TimeUnit.SECONDS);
+            } catch (Exception e) {
+               LOGGER.warn("[Anubis] Module config was still being written at shutdown", e);
             }
-
-            this.savedRevision = revision;
-         } catch (IOException e) {
-            LOGGER.warn("[Anubis] Failed to save module config", e);
          }
       }
    }
 
+   private static void writeJson(Path path, JsonObject root) throws IOException {
+      Path tmp = tmpPath(path);
+
+      try {
+         try (Writer writer = Files.newBufferedWriter(tmp)) {
+            GSON.toJson(root, writer);
+         }
+
+         try {
+            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+         } catch (IOException atomicFail) {
+            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+         }
+      } finally {
+         deleteQuietly(tmp);
+      }
+   }
+
+   private static void deleteQuietly(Path file) {
+      try {
+         Files.deleteIfExists(file);
+      } catch (IOException e) {
+         LOGGER.warn("[Anubis] Couldn't delete {}", file.getFileName());
+      }
+   }
+
+   private static Path tmpPath(Path path) {
+      return path.resolveSibling(path.getFileName() + ".tmp");
+   }
+
    public synchronized void tickAutosave() {
-      long now = System.nanoTime();
-      if (this.autosaveDue(ModuleRevision.current(), now)) {
-         this.save();
-         this.observedAt = now;
+      if (!this.writeFailed || !this.loaded || this.readOnly || this.lastWrite != null && !this.lastWrite.isDone()) {
+         long now = System.nanoTime();
+         if (this.autosaveDue(ModuleRevision.current(), now)) {
+            this.save();
+            this.observedAt = now;
+         }
+      } else {
+         long now = System.nanoTime();
+         if (now - this.observedAt >= 2000000000L) {
+            this.observedAt = now;
+            this.save();
+         }
       }
    }
 
@@ -227,9 +398,14 @@ public final class ModuleConfigStore {
 
                module.setKeybind(-1);
                module.setHoldMode(false);
+               JsonObject previous = this.retainedEntries.get(module.id());
                if (entry != null) {
                   entry = withoutPrivate(module, entry);
-                  applyModuleEntry(module, entry, enable);
+                  this.applyModuleEntry(module, entry, enable);
+               }
+
+               entry = keepSealed(module, previous, entry);
+               if (entry != null) {
                   this.retainedEntries.put(module.id(), entry);
                } else {
                   this.retainedEntries.remove(module.id());
@@ -357,19 +533,50 @@ public final class ModuleConfigStore {
    }
 
    private static JsonObject withoutPrivate(ClientModule module, JsonObject entry) {
-      JsonObject copy = entry.deepCopy();
-      if (copy.has("settings") && copy.get("settings").isJsonObject()) {
-         JsonObject settings = copy.getAsJsonObject("settings");
+      return withoutSettings(module, entry, Setting::isPrivate);
+   }
 
+   private static JsonObject withoutSettings(ClientModule module, JsonObject entry, Predicate<Setting> drop) {
+      JsonObject copy = entry.deepCopy();
+      if (copy.get("settings") instanceof JsonObject settings) {
          for (Setting setting : module.settings()) {
-            if (setting.isPrivate()) {
+            if (drop.test(setting)) {
                settings.remove(setting.id());
                settings.remove(setting.name());
+               settings.remove(sealedKey(setting));
             }
          }
       }
 
       return copy;
+   }
+
+   private static JsonObject keepSealed(ClientModule module, JsonObject previous, JsonObject entry) {
+      if (previous != null && previous.get("settings") instanceof JsonObject old) {
+         for (Setting setting : module.settings()) {
+            if (setting.isSecret() && old.get(sealedKey(setting)) instanceof JsonPrimitive sealed) {
+               if (entry == null) {
+                  entry = new JsonObject();
+               }
+
+               JsonObject settings = entry.get("settings") instanceof JsonObject existing ? existing : null;
+               if (settings == null) {
+                  settings = new JsonObject();
+                  entry.add("settings", settings);
+               }
+
+               settings.add(sealedKey(setting), sealed.deepCopy());
+            }
+         }
+
+         return entry;
+      } else {
+         return entry;
+      }
+   }
+
+   private static String sealedKey(Setting setting) {
+      return setting.id() + "#sealed";
    }
 
    private static boolean flag(JsonObject entry, String key) {
@@ -403,7 +610,7 @@ public final class ModuleConfigStore {
          JsonObject entry = this.orphanModules.remove(module.id());
          if (entry != null) {
             this.retainedEntries.put(module.id(), entry.deepCopy());
-            applyModuleEntry(module, entry, this.pendingEnabled);
+            this.applyModuleEntry(module, entry, this.pendingEnabled);
          }
       }
    }
@@ -452,7 +659,7 @@ public final class ModuleConfigStore {
                      this.orphanModules.put(name, moduleEntry.deepCopy());
                   } else {
                      this.retainedEntries.put(module.id(), moduleEntry.deepCopy());
-                     applyModuleEntry(module, moduleEntry, this.pendingEnabled);
+                     this.applyModuleEntry(module, moduleEntry, this.pendingEnabled);
                   }
                }
             }
@@ -489,21 +696,21 @@ public final class ModuleConfigStore {
       return FabricLoader.getInstance().getConfigDir().resolve("anubis").resolve("modules.json");
    }
 
-   private static void applyModuleEntry(ClientModule module, JsonObject entry, Map<String, Boolean> pendingEnabled) {
+   private void applyModuleEntry(ClientModule module, JsonObject entry, Map<String, Boolean> pendingEnabled) {
       if (entry.has("keybind") && entry.get("keybind").isJsonPrimitive()) {
          try {
             int key = entry.get("keybind").getAsInt();
             if (key == -1 || ModuleKeybinds.isBindable(key)) {
                module.setKeybind(key);
             }
-         } catch (RuntimeException var9) {
+         } catch (RuntimeException var10) {
          }
       }
 
       if (entry.has("holdMode") && entry.get("holdMode").isJsonPrimitive()) {
          try {
             module.setHoldMode(entry.get("holdMode").getAsBoolean());
-         } catch (RuntimeException var8) {
+         } catch (RuntimeException var9) {
          }
       }
 
@@ -595,6 +802,7 @@ public final class ModuleConfigStore {
 
       for (Setting setting : module.settings()) {
          settings.remove(setting.name());
+         settings.remove(sealedKey(setting));
          if (setting.isSessionOnly()) {
             settings.remove(setting.id());
          } else {

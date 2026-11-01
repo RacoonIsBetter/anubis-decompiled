@@ -13,17 +13,17 @@ import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.util.pvp.ServerRotation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.BlocksAttacksComponent;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.component.DataComponentTypes;
+import net.minecraft.util.math.MathHelper;
 
 @Environment(EnvType.CLIENT)
 public final class ShieldBreakerModule extends ClientModule {
@@ -31,11 +31,13 @@ public final class ShieldBreakerModule extends ClientModule {
    private static final String MODE_AUTO = "Auto";
    private static final int REARM_TICKS = 10;
    private static final int MAX_LEAD_TICKS = 4;
+   private static final int HOLD_TICKS = 2;
    private final ModeSetting mode = this.addSetting("mode", new ModeSetting("Mode", "Passive", "Passive", "Auto"));
    private final BooleanSetting switchBack = this.addSetting("switch-back", new BooleanSetting("Switch Back", true));
    private final SlotReturn slots = new SlotReturn(this);
    private int ticks;
    private int rearmTick;
+   private int takenTick;
 
    public ShieldBreakerModule() {
       super("shield-breaker", "Shield Breaker", "Swaps to an axe for any hit into a raised shield. Auto also makes the hit.", ModuleCategory.COMBAT);
@@ -54,19 +56,29 @@ public final class ShieldBreakerModule extends ClientModule {
 
    public void beforeAttack(ClientPlayerEntity player, Entity target) {
       if (target instanceof PlayerEntity other && !MeleeAttacks.disablesShields(player.getMainHandStack())) {
-         if (!MeleeAttacks.shieldBroken(other) && blocksSoon(player, other)) {
-            int slot = bestAxe(player);
-            if (slot >= 0 && this.slots.take(player, slot)) {
-               MeleeAttacks.noteShieldBroken(other);
+         if (fightingHand(player)) {
+            if (!MeleeAttacks.shieldBroken(other) && blocksSoon(player, other)) {
+               int slot = bestAxe(player);
+               if (slot >= 0 && this.slots.take(player, slot)) {
+                  this.takenTick = this.ticks;
+                  MeleeAttacks.noteShieldBroken(other);
+               }
             }
          }
       }
    }
 
+   private static boolean fightingHand(ClientPlayerEntity player) {
+      ItemStack main = player.getMainHandStack();
+      return main.isEmpty() || MeleeAttacks.isMeleeWeapon(main);
+   }
+
    @EventHandler(priority = EventPriority.HIGH)
    public void onTick(TickEvent event) {
       this.ticks++;
-      this.slots.tick(MinecraftClient.getInstance(), this.switchBack.get());
+      if (this.ticks - this.takenTick >= 2) {
+         this.slots.tick(MinecraftClient.getInstance(), this.switchBack.get());
+      }
    }
 
    @EventHandler
@@ -84,7 +96,7 @@ public final class ShieldBreakerModule extends ClientModule {
                EntityHitResult hit = MeleeAttacks.crosshairHit(mc);
                if (hit != null && hit.getEntity() instanceof PlayerEntity target && MeleeAttacks.isEnemy(player, target)) {
                   if (!MeleeAttacks.shieldBroken(target) && blocksSoon(player, target)) {
-                     if (MeleeAttacks.disablesShields(player.getMainHandStack()) || bestAxe(player) >= 0) {
+                     if (MeleeAttacks.disablesShields(player.getMainHandStack()) || bestAxe(player) >= 0 && fightingHand(player)) {
                         if (MeleeAttacks.attack(mc, hit)) {
                            this.rearmTick = this.ticks + 10;
                            MeleeAttacks.claimTick(mc);
@@ -103,8 +115,10 @@ public final class ShieldBreakerModule extends ClientModule {
       }
 
       ItemStack shield = target.getActiveItem();
-      BlocksAttacksComponent blocks = (BlocksAttacksComponent)shield.get(DataComponentTypes.BLOCKS_ATTACKS);
-      return blocks != null && target.getItemUseTime() + leadTicks(player) >= blocks.getBlockDelayTicks() ? MeleeAttacks.shieldBlocks(target, player, shield) : false;
+      BlocksAttacksComponent blocks = shield.get(DataComponentTypes.BLOCKS_ATTACKS);
+      return blocks != null && target.getItemUseTime() + leadTicks(player) >= blocks.getBlockDelayTicks()
+         ? MeleeAttacks.shieldBlocks(target, player, shield)
+         : false;
    }
 
    private static int leadTicks(ClientPlayerEntity player) {

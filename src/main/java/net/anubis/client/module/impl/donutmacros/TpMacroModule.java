@@ -14,12 +14,12 @@ import net.anubis.client.module.setting.StringSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 
 @Environment(EnvType.CLIENT)
 public final class TpMacroModule extends ClientModule {
-   private static final Pattern RATE_LIMIT = Pattern.compile("you need to wait another ([\\d.]+) seconds? to execute a command");
+   private static final Pattern RATE_LIMIT = Pattern.compile("^you need to wait another ([\\d.]+) seconds? to execute a command");
    private static final Pattern VALID_NAME = Pattern.compile("\\.?[A-Za-z0-9_]{1,16}");
    private final ModeSetting command = this.addSetting("command", new ModeSetting("Command", "tpa", "tpa", "tpahere"));
    private final StringSetting target = this.addSetting("player", new StringSetting("Player", "").hint("Player name"));
@@ -71,7 +71,7 @@ public final class TpMacroModule extends ClientModule {
          Matcher wait = RATE_LIMIT.matcher(ServerText.normalize(chat.content().getString()));
          if (wait.find()) {
             try {
-               this.holdUntil = System.currentTimeMillis() + (long)Math.ceil(Double.parseDouble(wait.group(1)) * 1000.0) + 80L;
+               this.holdUntil = System.currentTimeMillis() + (long)Math.ceil(Math.min(30.0, Double.parseDouble(wait.group(1))) * 1000.0) + 80L;
             } catch (NumberFormatException var5) {
             }
          }
@@ -87,6 +87,7 @@ public final class TpMacroModule extends ClientModule {
          long now = System.currentTimeMillis();
          if (now >= this.nextAt && now >= this.holdUntil) {
             player.networkHandler.sendChatCommand(this.command.get() + " " + this.target.get().trim());
+            this.confirm.sent();
             this.sent++;
             this.nextAt = now + (long)(this.interval.get() * 1000.0F);
          }

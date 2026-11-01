@@ -2,31 +2,35 @@ package net.anubis.client.module.impl.render;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import net.anubis.client.event.EventHandler;
 import net.anubis.client.event.impl.Render2DEvent;
+import net.anubis.client.event.impl.TickEvent;
 import net.anubis.client.gui.WorldLabel;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.ModuleRegistry;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.NameFilter;
-import net.anubis.client.util.StableTopK;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.render.Camera;
-import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.render.Camera;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix3x2fStack;
 
 @Environment(EnvType.CLIENT)
@@ -55,11 +59,13 @@ public class NametagsModule extends ClientModule {
    private static final float ICON_SCALE = 0.625F;
    private static final int TAG_CAP = 64;
    private static final double FULL_SIZE_DISTANCE = 8.0;
+   private static final int SEEN_LIMIT = 9;
+   private static final String SEEN_LABEL = "Seen";
+   private static final int SEEN_PLAYERS = 128;
    private static final Comparator<NametagsModule.Nearby> NEAREST = Comparator.comparingDouble(NametagsModule.Nearby::distanceSq);
-   private final StableTopK<NametagsModule.Nearby> mobilePlayers = new StableTopK<>(NEAREST);
-   private final StableTopK<NametagsModule.Nearby> mobileItems = new StableTopK<>(NEAREST);
    private final BooleanSetting sPing = this.addSetting("ping", new BooleanSetting("Ping", true));
    private final BooleanSetting sHeldItems = this.addSetting("held-items", new BooleanSetting("Held Items", true));
+   private final BooleanSetting sSeenItems = this.addSetting("seen-items", new BooleanSetting("Seen Items", true));
    private final BooleanSetting sArmor = this.addSetting("armor", new BooleanSetting("Armor", true));
    private final BooleanSetting sDurability = this.addSetting("durability", new BooleanSetting("Durability", true));
    private final BooleanSetting sHealth = this.addSetting("health", new BooleanSetting("Health", true));
@@ -70,15 +76,71 @@ public class NametagsModule extends ClientModule {
    private final NumberSetting sScale = this.addSetting("scale", new NumberSetting("Scale", 1.0F, 0.5F, 2.0F).step(0.1F));
    private final NumberSetting sMinScale = this.addSetting("min-scale", new NumberSetting("Min Scale", 0.55F, 0.3F, 1.0F).step(0.05F));
    private final NumberSetting sBackgroundAlpha = this.addSetting("background-alpha", new NumberSetting("Background Alpha", 0.45F, 0.0F, 1.0F).step(0.05F));
+   private final Map<UUID, LinkedHashMap<Item, ItemStack>> seen = new LinkedHashMap<>(16, 0.75F, true);
+   private ClientWorld seenLevel;
 
    public NametagsModule() {
       super("nametags", "Nametags", "Player nametags with held items, armour, health, ping and distance.", ModuleCategory.RENDER);
       this.sDurability.visibleWhen(() -> this.sHeldItems.get() || this.sArmor.get());
+      this.sSeenItems.visibleWhen(this.sHeldItems::get);
    }
 
    public static boolean hideVanillaNametags() {
       NametagsModule module = ModuleRegistry.get(NametagsModule.class);
       return module != null && module.isEnabled() && module.sHideVanilla.get();
+   }
+
+   @EventHandler
+   public void onTick(TickEvent event) {
+      MinecraftClient mc = MinecraftClient.getInstance();
+      if (mc.world != this.seenLevel) {
+         this.seen.clear();
+         this.seenLevel = mc.world;
+      }
+
+      if (mc.world != null && this.sHeldItems.get() && this.sSeenItems.get()) {
+         for (AbstractClientPlayerEntity player : mc.world.getPlayers()) {
+            if (player != mc.player) {
+               this.remember(player.getUuid(), player.getMainHandStack());
+               this.remember(player.getUuid(), player.getOffHandStack());
+            }
+         }
+      }
+   }
+
+   private void remember(UUID id, ItemStack stack) {
+      if (!stack.isEmpty()) {
+         LinkedHashMap<Item, ItemStack> items = this.seen.computeIfAbsent(id, key -> new LinkedHashMap<>());
+         ItemStack known = items.remove(stack.getItem());
+         items.put(stack.getItem(), known != null && ItemStack.areItemsAndComponentsEqual(known, stack) ? known : stack.copy());
+
+         while (items.size() > 9) {
+            items.remove(items.keySet().iterator().next());
+         }
+
+         while (this.seen.size() > 128) {
+            this.seen.remove(this.seen.keySet().iterator().next());
+         }
+      }
+   }
+
+   private List<ItemStack> seenItems(AbstractClientPlayerEntity player) {
+      LinkedHashMap<Item, ItemStack> items = this.seen.get(player.getUuid());
+      if (items != null && !items.isEmpty()) {
+         Item main = player.getMainHandStack().getItem();
+         Item off = player.getOffHandStack().getItem();
+         List<ItemStack> out = new ArrayList<>(items.size());
+
+         for (ItemStack stack : items.values()) {
+            if (stack.getItem() != main && stack.getItem() != off) {
+               out.add(0, stack);
+            }
+         }
+
+         return out;
+      } else {
+         return List.of();
+      }
    }
 
    @EventHandler
@@ -92,90 +154,41 @@ public class NametagsModule extends ClientModule {
             double range = Math.max(1.0F, this.sRange.get());
             double rangeSq = range * range;
             int budget = Math.max(1, Math.min(64, this.sMaxTags.getInt()));
-            boolean mobile = MobilePerformance.active();
+            List<NametagsModule.Nearby> players = new ArrayList<>();
 
-            try {
-               if (!mobile) {
-                  this.clearMobileTargets();
-               }
-
-               if (mobile) {
-                  this.mobilePlayers.reset(budget);
-               }
-
-               List<NametagsModule.Nearby> players = mobile ? null : new ArrayList<>();
-
-               for (AbstractClientPlayerEntity player : mc.world.getPlayers()) {
-                  if (player != mc.player && !player.isRemoved() && !player.isDead()) {
-                     double distanceSq = player.getLerpedPos(partialTick).squaredDistanceTo(eye);
-                     if (distanceSq <= rangeSq) {
-                        if (mobile) {
-                           offerNearest(this.mobilePlayers, player, distanceSq);
-                        } else {
-                           players.add(new NametagsModule.Nearby(player, distanceSq));
-                        }
-                     }
+            for (AbstractClientPlayerEntity player : mc.world.getPlayers()) {
+               if (player != mc.player && !player.isRemoved() && !player.isDead()) {
+                  double distanceSq = player.getLerpedPos(partialTick).squaredDistanceTo(eye);
+                  if (distanceSq <= rangeSq) {
+                     players.add(new NametagsModule.Nearby(player, distanceSq));
                   }
-               }
-
-               players = nearest(mobile ? this.mobilePlayers.result() : players, budget);
-               int itemBudget = budget - players.size();
-               if (mobile) {
-                  this.mobileItems.reset(itemBudget);
-               }
-
-               List<NametagsModule.Nearby> items = mobile ? this.mobileItems.result() : new ArrayList<>();
-               if (this.sItems.get() && itemBudget > 0) {
-                  for (Entity entity : mc.world.getEntities()) {
-                     if (entity instanceof ItemEntity item && !item.isRemoved() && !item.getStack().isEmpty()) {
-                        double distanceSq = item.getLerpedPos(partialTick).squaredDistanceTo(eye);
-                        if (distanceSq <= rangeSq) {
-                           if (mobile) {
-                              offerNearest(this.mobileItems, item, distanceSq);
-                           } else {
-                              items.add(new NametagsModule.Nearby(item, distanceSq));
-                           }
-                        }
-                     }
-                  }
-
-                  items = nearest(mobile ? this.mobileItems.result() : items, itemBudget);
-               }
-
-               for (int i = items.size() - 1; i >= 0; i--) {
-                  this.renderItemTag(event.graphics, mc, camera, (ItemEntity)items.get(i).entity(), partialTick);
-               }
-
-               for (int i = players.size() - 1; i >= 0; i--) {
-                  this.renderTag(event.graphics, mc, camera, (AbstractClientPlayerEntity)players.get(i).entity(), partialTick);
-               }
-            } finally {
-               if (mobile) {
-                  this.clearMobileTargets();
                }
             }
-         } else {
-            this.clearMobileTargets();
+
+            players = nearest(players, budget);
+            int itemBudget = budget - players.size();
+            List<NametagsModule.Nearby> items = new ArrayList<>();
+            if (this.sItems.get() && itemBudget > 0) {
+               for (Entity entity : mc.world.getEntities()) {
+                  if (entity instanceof ItemEntity item && !item.isRemoved() && !item.getStack().isEmpty()) {
+                     double distanceSq = item.getLerpedPos(partialTick).squaredDistanceTo(eye);
+                     if (distanceSq <= rangeSq) {
+                        items.add(new NametagsModule.Nearby(item, distanceSq));
+                     }
+                  }
+               }
+
+               items = nearest(items, itemBudget);
+            }
+
+            for (int i = items.size() - 1; i >= 0; i--) {
+               this.renderItemTag(event.graphics, mc, camera, (ItemEntity)items.get(i).entity(), partialTick);
+            }
+
+            for (int i = players.size() - 1; i >= 0; i--) {
+               this.renderTag(event.graphics, mc, camera, (AbstractClientPlayerEntity)players.get(i).entity(), partialTick);
+            }
          }
-      } else {
-         this.clearMobileTargets();
-      }
-   }
-
-   @Override
-   protected void onDisable() {
-      this.clearMobileTargets();
-   }
-
-   private void clearMobileTargets() {
-      this.mobilePlayers.reset(0);
-      this.mobileItems.reset(0);
-   }
-
-   private static void offerNearest(StableTopK<NametagsModule.Nearby> nearest, Entity entity, double distanceSq) {
-      NametagsModule.Nearby worst = nearest.worst();
-      if (worst == null || Double.compare(distanceSq, worst.distanceSq()) < 0) {
-         nearest.offer(new NametagsModule.Nearby(entity, distanceSq));
       }
    }
 
@@ -203,6 +216,7 @@ public class NametagsModule extends ClientModule {
 
          List<ItemStack> hands = this.sHeldItems.get() ? heldItems(player) : List.of();
          List<ItemStack> armor = this.sArmor.get() ? wornArmor(player) : List.of();
+         List<ItemStack> earlier = this.sHeldItems.get() && this.sSeenItems.get() ? this.seenItems(player) : List.of();
          String healthText = null;
          int healthColor = -13577896;
          float health = player.getHealth() + player.getAbsorptionAmount();
@@ -223,9 +237,10 @@ public class NametagsModule extends ClientModule {
          row2W = extend(row2W, armorW, 7);
          row2W = extend(row2W, healthW, 4);
          row2W = extend(row2W, distW, 4);
-         int contentW = Math.max(row1W, row2W);
+         int row3W = earlier.isEmpty() ? 0 : font.getWidth("Seen") + 4 + iconsWidth(earlier.size());
+         int contentW = Math.max(Math.max(row1W, row2W), row3W);
          int panelW = contentW + 8;
-         int panelH = 8 + 9 + 3 + 10;
+         int panelH = 8 + 9 + 3 + 10 + (earlier.isEmpty() ? 0 : 13);
          float baseScale = Math.max(0.5F, Math.min(2.0F, this.sScale.get()));
          double minScale = Math.max(0.3F, Math.min(1.0F, this.sMinScale.get()));
          float distScale = (float)Math.min(1.0, Math.max(minScale, 8.0 / Math.max(1.0, dist)));
@@ -282,6 +297,12 @@ public class NametagsModule extends ClientModule {
          }
 
          graphics.drawText(font, distText, cursor, labelY, -6052949, guard);
+         if (!earlier.isEmpty()) {
+            int seenY = rowY + 10 + 3;
+            graphics.drawText(font, "Seen", left, seenY + (10 - 9) / 2 + 1, -6052949, guard);
+            this.drawIcons(graphics, font, player, earlier, hands.size() + armor.size(), left + font.getWidth("Seen") + 4, seenY, false, chrome);
+         }
+
          pose.popMatrix();
       }
    }
@@ -318,7 +339,15 @@ public class NametagsModule extends ClientModule {
    }
 
    private int drawIcons(
-      DrawContext graphics, TextRenderer font, AbstractClientPlayerEntity holder, List<ItemStack> stacks, int seedOffset, int x, int y, boolean counts, float chrome
+      DrawContext graphics,
+      TextRenderer font,
+      AbstractClientPlayerEntity holder,
+      List<ItemStack> stacks,
+      int seedOffset,
+      int x,
+      int y,
+      boolean counts,
+      float chrome
    ) {
       for (int i = 0; i < stacks.size(); i++) {
          if (i > 0) {
@@ -332,7 +361,9 @@ public class NametagsModule extends ClientModule {
       return x;
    }
 
-   private void drawIcon(DrawContext graphics, TextRenderer font, AbstractClientPlayerEntity holder, ItemStack stack, int seed, int x, int y, boolean count, float chrome) {
+   private void drawIcon(
+      DrawContext graphics, TextRenderer font, AbstractClientPlayerEntity holder, ItemStack stack, int seed, int x, int y, boolean count, float chrome
+   ) {
       if (stack.isEmpty()) {
          graphics.fill(x + 2, y + 2, x + 10 - 2, y + 10 - 2, scaleAlpha(452984831, chrome));
       } else {

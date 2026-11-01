@@ -4,11 +4,10 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.pipeline.RenderPipeline.Builder;
-import com.mojang.blaze3d.pipeline.RenderPipeline.Snippet;
 import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.systems.ProjectionType;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
@@ -20,36 +19,34 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.render.entity.state.EntityRenderState;
-import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
-import com.mojang.blaze3d.systems.ProjectionType;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gl.Framebuffer;
+import net.minecraft.client.gl.SimpleFramebuffer;
 import net.minecraft.client.gl.UniformType;
+import net.minecraft.client.render.Camera;
+import net.minecraft.client.render.OutlineVertexConsumerProvider;
 import net.minecraft.client.render.RawProjectionMatrix;
+import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.VertexFormats;
+import net.minecraft.client.render.VertexConsumerProvider.Immediate;
 import net.minecraft.client.render.command.OrderedRenderCommandQueueImpl;
 import net.minecraft.client.render.command.RenderDispatcher;
-import net.minecraft.client.render.state.CameraRenderState;
-import net.minecraft.entity.Entity;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.util.Identifier;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.Camera;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.OutlineVertexConsumerProvider;
-import net.minecraft.client.gl.SimpleFramebuffer;
-import net.minecraft.client.render.model.BakedQuad;
-import net.minecraft.world.tick.TickManager;
 import net.minecraft.client.render.entity.EntityRenderManager;
-import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.client.render.entity.state.EntityRenderState;
+import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
+import net.minecraft.client.render.model.BakedQuad;
+import net.minecraft.client.render.state.CameraRenderState;
 import net.minecraft.client.util.BufferAllocator;
+import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.util.math.MatrixStack.Entry;
-import net.minecraft.client.render.VertexConsumerProvider.Immediate;
+import net.minecraft.entity.Entity;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.tick.TickManager;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fStack;
 import org.lwjgl.BufferUtils;
@@ -59,8 +56,19 @@ import org.slf4j.LoggerFactory;
 @Environment(EnvType.CLIENT)
 final class ShaderEspPass {
    private static final Logger LOGGER = LoggerFactory.getLogger("Anubis");
-   private static final RenderPipeline PIPELINE = pipeline(false);
-   private static final RenderPipeline MOBILE_PIPELINE = pipeline(true);
+   private static final RenderPipeline PIPELINE = RenderPipeline.builder()
+      .withLocation(Identifier.of("anubis", "pipeline/glow_esp"))
+      .withVertexShader("core/screenquad")
+      .withFragmentShader(Identifier.of("anubis", "core/glow_esp"))
+      .withSampler("SilhouetteSampler")
+      .withSampler("HaloSampler")
+      .withUniform("GlowEspConfig", UniformType.UNIFORM_BUFFER)
+      .withBlend(BlendFunction.TRANSLUCENT_PREMULTIPLIED_ALPHA)
+      .withColorWrite(true, false)
+      .withDepthWrite(false)
+      .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+      .withVertexFormat(VertexFormats.EMPTY, DrawMode.TRIANGLES)
+      .build();
    private static final Supplier<String> PASS_LABEL = () -> "Anubis glow esp";
    private static final Supplier<String> CONFIG_LABEL = () -> "Anubis glow esp config";
    private static final int CONFIG_SIZE = 32;
@@ -76,30 +84,6 @@ final class ShaderEspPass {
    private static ByteBuffer configData;
    private static long keptFrame = Long.MIN_VALUE;
    private static boolean invalidShaderLogged;
-
-   private static RenderPipeline pipeline(boolean mobile) {
-      Builder builder = RenderPipeline.builder(new Snippet[0])
-         .withLocation(Identifier.of("anubis", mobile ? "pipeline/glow_esp_mobile" : "pipeline/glow_esp"))
-         .withVertexShader("core/screenquad")
-         .withFragmentShader(Identifier.of("anubis", "core/glow_esp"))
-         .withSampler("SilhouetteSampler")
-         .withSampler("HaloSampler")
-         .withUniform("GlowEspConfig", UniformType.UNIFORM_BUFFER)
-         .withBlend(BlendFunction.TRANSLUCENT_PREMULTIPLIED_ALPHA)
-         .withColorWrite(true, false)
-         .withDepthWrite(false)
-         .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
-         .withVertexFormat(VertexFormats.EMPTY, DrawMode.TRIANGLES);
-      if (mobile) {
-         builder.withShaderDefine("ANUBIS_MOBILE_OUTLINE");
-      }
-
-      return builder.build();
-   }
-
-   private static RenderPipeline selectedPipeline(GpuDevice device) {
-      return MobilePerformance.active() && device.precompilePipeline(MOBILE_PIPELINE).isValid() ? MOBILE_PIPELINE : PIPELINE;
-   }
 
    private ShaderEspPass() {
    }
@@ -179,9 +163,7 @@ final class ShaderEspPass {
 
             silhouetteOnly(state);
             state.outlineColor = tints[i] | 0xFF000000;
-            dispatcher.render(
-               state, CAMERA, state.x - eye.x, state.y - eye.y, state.z - eye.z, POSE, rig.storage
-            );
+            dispatcher.render(state, CAMERA, state.x - eye.x, state.y - eye.y, state.z - eye.z, POSE, rig.storage);
          }
       }
    }
@@ -234,33 +216,18 @@ final class ShaderEspPass {
       configData.putFloat(24, (sheenArgb & 0xFF) / 255.0F);
       configData.putFloat(28, sheen);
       encoder.writeToBuffer(configSlice, configData);
-      RenderPass pass = encoder.createRenderPass(PASS_LABEL, main.getColorAttachmentView(), OptionalInt.empty());
 
-      try {
-         pass.setPipeline(selectedPipeline(RenderSystem.getDevice()));
+      try (RenderPass pass = encoder.createRenderPass(PASS_LABEL, main.getColorAttachmentView(), OptionalInt.empty())) {
+         pass.setPipeline(PIPELINE);
          pass.setUniform("GlowEspConfig", configSlice);
          pass.bindTexture("SilhouetteSampler", mask.getColorAttachmentView(), RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
          pass.bindTexture("HaloSampler", halo, RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
          pass.draw(0, 3);
-      } catch (Throwable var14) {
-         if (pass != null) {
-            try {
-               pass.close();
-            } catch (Throwable var13) {
-               var14.addSuppressed(var13);
-            }
-         }
-
-         throw var14;
-      }
-
-      if (pass != null) {
-         pass.close();
       }
    }
 
    private static boolean shaderReady(GpuDevice device) {
-      if (device.precompilePipeline(selectedPipeline(device)).isValid() && AuraBlur.compiled(device, false)) {
+      if (device.precompilePipeline(PIPELINE).isValid() && AuraBlur.compiled(device)) {
          invalidShaderLogged = false;
          return true;
       }
@@ -275,7 +242,7 @@ final class ShaderEspPass {
 
    private static void allocate(int width, int height) {
       mask = new SimpleFramebuffer("Anubis glow esp mask", width, height, false);
-      blur = new AuraBlur("Anubis glow esp aura", false);
+      blur = new AuraBlur("Anubis glow esp aura");
       config = RenderSystem.getDevice().createBuffer(CONFIG_LABEL, 136, 32L);
       configSlice = config.slice();
       configData = BufferUtils.createByteBuffer(32);
@@ -317,66 +284,81 @@ final class ShaderEspPass {
       private final Map<RenderLayer, VertexConsumer> sinks = new IdentityHashMap<>();
 
       Drain() {
-         super(new BufferAllocator(64), new LinkedHashMap());
+         super(new BufferAllocator(64), new LinkedHashMap<>());
       }
 
       void close() {
          this.allocator.close();
       }
 
-      public VertexConsumer getBuffer(RenderLayer renderType) {
-         return this.sinks.computeIfAbsent(renderType, type -> new ShaderEspPass.Nowhere());
+      @Override
+      public VertexConsumer getBuffer(RenderLayer layer) {
+         return this.sinks.computeIfAbsent(layer, type -> new ShaderEspPass.Nowhere());
       }
 
+      @Override
       public void drawCurrentLayer() {
       }
 
+      @Override
       public void draw() {
       }
 
-      public void draw(RenderLayer renderType) {
+      @Override
+      public void draw(RenderLayer layer) {
       }
    }
 
    @Environment(EnvType.CLIENT)
    private static final class Nowhere implements VertexConsumer {
+      @Override
       public VertexConsumer vertex(float x, float y, float z) {
          return this;
       }
 
+      @Override
       public void vertex(float x, float y, float z, int color, float u, float v, int overlay, int light, float normalX, float normalY, float normalZ) {
       }
 
-      public void quad(Entry pose, BakedQuad quad, float red, float green, float blue, float alpha, int light, int overlay) {
+      @Override
+      public void quad(Entry matrixEntry, BakedQuad quad, float red, float green, float blue, float alpha, int light, int overlay) {
       }
 
-      public void quad(Entry pose, BakedQuad quad, float[] brightness, float red, float green, float blue, float alpha, int[] lights, int overlay) {
+      @Override
+      public void quad(Entry matrixEntry, BakedQuad quad, float[] brightnesses, float red, float green, float blue, float alpha, int[] lights, int overlay) {
       }
 
+      @Override
       public VertexConsumer color(int red, int green, int blue, int alpha) {
          return this;
       }
 
+      @Override
       public VertexConsumer color(int argb) {
          return this;
       }
 
+      @Override
       public VertexConsumer texture(float u, float v) {
          return this;
       }
 
+      @Override
       public VertexConsumer overlay(int u, int v) {
          return this;
       }
 
+      @Override
       public VertexConsumer light(int u, int v) {
          return this;
       }
 
+      @Override
       public VertexConsumer normal(float x, float y, float z) {
          return this;
       }
 
+      @Override
       public VertexConsumer lineWidth(float width) {
          return this;
       }
@@ -391,7 +373,9 @@ final class ShaderEspPass {
 
       Rig(MinecraftClient mc) {
          this.outlines = mc.getBufferBuilders().getOutlineVertexConsumers();
-         this.features = new RenderDispatcher(this.storage, mc.getBlockRenderManager(), this.drain, mc.getAtlasManager(), this.outlines, this.drain, mc.textRenderer);
+         this.features = new RenderDispatcher(
+            this.storage, mc.getBlockRenderManager(), this.drain, mc.getAtlasManager(), this.outlines, this.drain, mc.textRenderer
+         );
       }
 
       void close() {

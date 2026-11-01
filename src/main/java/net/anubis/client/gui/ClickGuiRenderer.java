@@ -3,7 +3,6 @@ package net.anubis.client.gui;
 import imgui.ImDrawList;
 import imgui.ImFont;
 import imgui.ImGui;
-import imgui.glfw.AnubisKeys;
 import imgui.type.ImBoolean;
 import imgui.type.ImString;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
@@ -47,11 +46,10 @@ import net.anubis.client.module.setting.NumberSetting;
 import net.anubis.client.module.setting.Setting;
 import net.anubis.client.module.setting.StringListSetting;
 import net.anubis.client.module.setting.StringSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.util.Util;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.Util;
 import org.lwjgl.glfw.GLFW;
 
 @Environment(EnvType.CLIENT)
@@ -156,6 +154,10 @@ public final class ClickGuiRenderer {
    private boolean focusSearch;
    private float searchBodyH;
    private final Map<String, float[]> panelSpots = new HashMap<>();
+   private final Map<String, float[]> panelHomes = new HashMap<>();
+   private final Map<String, float[]> panelTargets = new HashMap<>();
+   private String panelLayoutKey = "";
+   private boolean panelHomesDirty;
    private ClickGuiRenderer.CategoryPanel[] panelCache = new ClickGuiRenderer.CategoryPanel[0];
    private int panelCacheRevision = -1;
    private final Map<String, float[]> panelFold = new HashMap<>();
@@ -254,6 +256,7 @@ public final class ClickGuiRenderer {
          }
 
          this.renderTabBar(dt, open);
+         this.savePanelHomes();
          this.renderColorPickerWindow();
          this.blockLists.renderWindows();
          this.itemPickers.renderWindows();
@@ -266,8 +269,6 @@ public final class ClickGuiRenderer {
 
          removeTheme();
       }
-
-      AndroidSystemPicker.render();
    }
 
    private void handleShortcuts() {
@@ -291,15 +292,17 @@ public final class ClickGuiRenderer {
 
    private void renderModulePanels(float dt, float alpha) {
       ClickGuiRenderer.CategoryPanel[] panels = this.visiblePanels();
-      boolean placed = this.panelSpots.containsKey("##panel_search");
+      boolean placed = this.panelHomes.containsKey("##panel_search");
 
       for (ClickGuiRenderer.CategoryPanel panel : panels) {
-         placed &= this.panelSpots.containsKey(panel.id());
+         placed &= this.panelHomes.containsKey(panel.id());
       }
 
       if (!placed) {
          this.placeNewPanels(panels);
       }
+
+      this.fitPanels(panels);
 
       for (ClickGuiRenderer.CategoryPanel panel : panels) {
          this.renderCategoryPanel(panel, dt, alpha);
@@ -434,17 +437,36 @@ public final class ClickGuiRenderer {
    }
 
    private boolean beginPanel(String id, float alpha) {
-      float[] spot = this.panelSpots.get(id);
-      ImGui.setNextWindowPos(spot[0], spot[1], 4);
+      float[] target = this.panelTargets.remove(id);
+      if (target != null) {
+         ImGui.setNextWindowPos(target[0], target[1], 1);
+      }
+
       ImGui.setNextWindowSizeConstraints(AnubisWidgets.s(212.0F), 0.0F, AnubisWidgets.s(212.0F), Float.MAX_VALUE);
       ImGui.pushStyleVar(0, alpha);
       ImGui.pushStyleVar(2, 0.0F, 0.0F);
       ImGui.pushStyleVar(14, 0.0F, 0.0F);
       ImGui.pushStyleVar(3, panelRounding());
       boolean open = ImGui.begin(id, 123);
-      spot[0] = ImGui.getWindowPosX();
-      spot[1] = ImGui.getWindowPosY();
+      float x = ImGui.getWindowPosX();
+      float y = ImGui.getWindowPosY();
+      float[] spot = this.panelSpots.computeIfAbsent(id, key -> new float[]{x, y});
+      boolean moved = Math.abs(x - spot[0]) > 0.5F || Math.abs(y - spot[1]) > 0.5F;
+      if (target == null && moved && ImGui.isMouseDown(0)) {
+         this.panelHomes.put(id, new float[]{x / AnubisWidgets.s(1.0F), y / AnubisWidgets.s(1.0F)});
+         this.panelHomesDirty = true;
+      }
+
+      spot[0] = x;
+      spot[1] = y;
       return open;
+   }
+
+   private void savePanelHomes() {
+      if (this.panelHomesDirty && !ImGui.isMouseDown(0)) {
+         this.panelHomesDirty = false;
+         PanelStateStore.getInstance().setPanelHomes(this.panelHomes);
+      }
    }
 
    private static void endPanel() {
@@ -711,7 +733,7 @@ public final class ClickGuiRenderer {
       }
    }
 
-   private void placeNewPanels(ClickGuiRenderer.CategoryPanel[] panels) {
+   private ClickGuiRenderer.PanelLayout panelLayout(ClickGuiRenderer.CategoryPanel[] panels) {
       List<String> ids = new ArrayList<>();
       List<String> keys = new ArrayList<>();
       List<Float> heights = new ArrayList<>();
@@ -730,25 +752,44 @@ public final class ClickGuiRenderer {
       ids.add("##panel_search");
       keys.add("search");
       heights.add(AnubisWidgets.s(42.0F) + ImGui.getFontSize() + AnubisWidgets.s(18.0F) + maxListHeight());
-      Map<String, float[]> saved = savedPanelSpots();
+      return new ClickGuiRenderer.PanelLayout(ids, keys, heights);
+   }
+
+   private void placeNewPanels(ClickGuiRenderer.CategoryPanel[] panels) {
+      ClickGuiRenderer.PanelLayout layout = this.panelLayout(panels);
+      List<String> ids = layout.ids();
+      List<String> keys = layout.keys();
+      List<Float> heights = layout.heights();
+      float scale = AnubisWidgets.s(1.0F);
+      Map<String, float[]> stored = PanelStateStore.getInstance().panelHomes();
+      Map<String, float[]> legacy = stored.isEmpty() ? savedPanelSpots() : Map.of();
       List<float[]> taken = new ArrayList<>();
 
       for (int i = 0; i < ids.size(); i++) {
-         float[] spot = this.panelSpots.get(ids.get(i));
-         if (spot == null && saved.containsKey(ids.get(i))) {
-            spot = saved.get(ids.get(i));
-            this.panelSpots.put(ids.get(i), spot);
+         String id = ids.get(i);
+         if (!this.panelHomes.containsKey(id)) {
+            float[] home = stored.get(id);
+            float[] old = legacy.get(id);
+            if (home == null && old != null && coveredArea(old[0], old[1], heights.get(i), taken) == 0.0F) {
+               home = new float[]{old[0] / scale, old[1] / scale};
+               this.panelHomesDirty = true;
+            }
+
+            if (home != null) {
+               this.panelHomes.put(id, home);
+            }
          }
 
-         if (spot != null) {
-            taken.add(new float[]{spot[0], spot[1], AnubisWidgets.s(212.0F), heights.get(i)});
+         float[] home = this.panelHomes.get(id);
+         if (home != null) {
+            taken.add(new float[]{home[0] * scale, home[1] * scale, AnubisWidgets.s(212.0F), heights.get(i)});
          }
       }
 
       boolean firstRun = taken.isEmpty();
 
       for (int i = 0; i < ids.size(); i++) {
-         if (!this.panelSpots.containsKey(ids.get(i))) {
+         if (!this.panelHomes.containsKey(ids.get(i))) {
             float h = heights.get(i);
             float[] spot = bundledSpot(keys.get(i));
             if (spot == null && firstRun) {
@@ -759,8 +800,46 @@ public final class ClickGuiRenderer {
                spot = freeSpot(h, taken);
             }
 
-            this.panelSpots.put(ids.get(i), spot);
+            this.panelHomes.put(ids.get(i), new float[]{spot[0] / scale, spot[1] / scale});
             taken.add(new float[]{spot[0], spot[1], AnubisWidgets.s(212.0F), h});
+            this.panelHomesDirty = true;
+         }
+      }
+
+      this.panelLayoutKey = "";
+   }
+
+   private void fitPanels(ClickGuiRenderer.CategoryPanel[] panels) {
+      float sw = ImGui.getIO().getDisplaySizeX();
+      float sh = ImGui.getIO().getDisplaySizeY();
+      float scale = AnubisWidgets.s(1.0F);
+      String key = sw + "x" + sh + "@" + scale;
+      if (!key.equals(this.panelLayoutKey)) {
+         this.panelLayoutKey = key;
+         ClickGuiRenderer.PanelLayout layout = this.panelLayout(panels);
+         float w = AnubisWidgets.s(212.0F);
+         float lowest = sh - AnubisWidgets.s(70.0F) - AnubisWidgets.s(42.0F);
+         List<float[]> taken = new ArrayList<>();
+         List<Integer> misfits = new ArrayList<>();
+
+         for (int i = 0; i < layout.ids().size(); i++) {
+            String id = layout.ids().get(i);
+            float[] home = this.panelHomes.get(id);
+            float x = home[0] * scale;
+            float y = home[1] * scale;
+            if (x >= 0.0F && y >= 0.0F && x + w <= sw && y <= lowest) {
+               this.panelTargets.put(id, new float[]{x, y});
+               taken.add(new float[]{x, y, w, layout.heights().get(i)});
+            } else {
+               misfits.add(i);
+            }
+         }
+
+         for (int i : misfits) {
+            float h = layout.heights().get(i);
+            float[] spot = freeSpot(h, taken);
+            this.panelTargets.put(layout.ids().get(i), spot);
+            taken.add(new float[]{spot[0], spot[1], w, h});
          }
       }
    }
@@ -1421,7 +1500,7 @@ public final class ClickGuiRenderer {
       float acx = x0 + avatarR;
       float acy = y0 + rowH * 0.5F;
       int avatarColor = AVATAR_COLORS[Math.floorMod(name.toLowerCase(Locale.ROOT).hashCode(), AVATAR_COLORS.length)];
-      dl.addCircleFilled(acx, acy, avatarR, AnubisWidgets.c(avatarColor), MobilePerformance.uiSegments(32, avatarR));
+      dl.addCircleFilled(acx, acy, avatarR, AnubisWidgets.c(avatarColor), 32);
       ImFont category = ImGuiManager.getInstance().categoryFont();
       String initial = name.substring(0, 1).toUpperCase(Locale.ROOT);
       AnubisWidgets.text(dl, category, acx - AnubisWidgets.textWidth(category, initial) * 0.5F, acy - AnubisWidgets.lineHeight(category) * 0.5F, -1, initial);
@@ -1439,13 +1518,7 @@ public final class ClickGuiRenderer {
       float rcx = rx + removeSize * 0.5F;
       float rcy = ry + removeSize * 0.5F;
       if (removeHover > 0.01F) {
-         dl.addCircleFilled(
-            rcx,
-            rcy,
-            removeSize * 0.5F,
-            AnubisWidgets.c(AnubisWidgets.withAlpha(-10856974, 0.18F * removeHover)),
-            MobilePerformance.uiSegments(32, removeSize * 0.5F)
-         );
+         dl.addCircleFilled(rcx, rcy, removeSize * 0.5F, AnubisWidgets.c(AnubisWidgets.withAlpha(-10856974, 0.18F * removeHover)), 32);
       }
 
       AnubisWidgets.cross(
@@ -1860,43 +1933,41 @@ public final class ClickGuiRenderer {
    }
 
    private void highlightSurfaces(ThemeStore theme) {
-      if (!AndroidSystemPicker.blocksEditor()) {
-         float mx = ImGui.getIO().getMousePosX();
-         float my = ImGui.getIO().getMousePosY();
-         boolean blocked = contains(this.inspectorRect, mx, my) || ImGui.isPopupOpen("", 3072);
-         Surface hovered = null;
-         if (!blocked) {
-            for (float[] rect : this.panelRects) {
-               if (contains(rect, mx, my)) {
-                  hovered = theme.panels;
-               }
-            }
-
-            if (contains(this.cardRect, mx, my)) {
-               hovered = theme.cards;
-            }
-
-            if (contains(this.tabBarRect, mx, my)) {
-               hovered = theme.tabBar;
+      float mx = ImGui.getIO().getMousePosX();
+      float my = ImGui.getIO().getMousePosY();
+      boolean blocked = contains(this.inspectorRect, mx, my) || ImGui.isPopupOpen("", 3072);
+      Surface hovered = null;
+      if (!blocked) {
+         for (float[] rect : this.panelRects) {
+            if (contains(rect, mx, my)) {
+               hovered = theme.panels;
             }
          }
 
-         this.hoveredSurface = hovered;
-         if (hovered != null) {
-            ImDrawList fg = ImGui.getForegroundDrawList();
-            boolean tabBar = hovered == theme.tabBar;
-            String hint = hovered.label + (tabBar ? "  ·  right-click to edit" : "  ·  click to edit");
-            ImFont small = ImGuiManager.getInstance().smallFont();
-            float chipW = AnubisWidgets.textWidth(small, hint) + AnubisWidgets.s(18.0F);
-            float chipH = AnubisWidgets.lineHeight(small) + AnubisWidgets.s(10.0F);
-            float cx = Math.min(mx + AnubisWidgets.s(14.0F), ImGui.getIO().getDisplaySizeX() - chipW - AnubisWidgets.s(4.0F));
-            float cy = Math.min(my + AnubisWidgets.s(18.0F), ImGui.getIO().getDisplaySizeY() - chipH - AnubisWidgets.s(4.0F));
-            fg.addRectFilled(cx, cy, cx + chipW, cy + chipH, GuiPalette.accent(), chipH * 0.5F);
-            AnubisWidgets.text(fg, small, cx + AnubisWidgets.s(9.0F), cy + AnubisWidgets.s(5.0F), -1, hint);
-            boolean clicked = tabBar ? ImGui.isMouseClicked(1) : ImGui.isMouseClicked(0) || ImGui.isMouseClicked(1);
-            if (clicked) {
-               this.selectSurface(hovered);
-            }
+         if (contains(this.cardRect, mx, my)) {
+            hovered = theme.cards;
+         }
+
+         if (contains(this.tabBarRect, mx, my)) {
+            hovered = theme.tabBar;
+         }
+      }
+
+      this.hoveredSurface = hovered;
+      if (hovered != null) {
+         ImDrawList fg = ImGui.getForegroundDrawList();
+         boolean tabBar = hovered == theme.tabBar;
+         String hint = hovered.label + (tabBar ? "  ·  right-click to edit" : "  ·  click to edit");
+         ImFont small = ImGuiManager.getInstance().smallFont();
+         float chipW = AnubisWidgets.textWidth(small, hint) + AnubisWidgets.s(18.0F);
+         float chipH = AnubisWidgets.lineHeight(small) + AnubisWidgets.s(10.0F);
+         float cx = Math.min(mx + AnubisWidgets.s(14.0F), ImGui.getIO().getDisplaySizeX() - chipW - AnubisWidgets.s(4.0F));
+         float cy = Math.min(my + AnubisWidgets.s(18.0F), ImGui.getIO().getDisplaySizeY() - chipH - AnubisWidgets.s(4.0F));
+         fg.addRectFilled(cx, cy, cx + chipW, cy + chipH, GuiPalette.accent(), chipH * 0.5F);
+         AnubisWidgets.text(fg, small, cx + AnubisWidgets.s(9.0F), cy + AnubisWidgets.s(5.0F), -1, hint);
+         boolean clicked = tabBar ? ImGui.isMouseClicked(1) : ImGui.isMouseClicked(0) || ImGui.isMouseClicked(1);
+         if (clicked) {
+            this.selectSurface(hovered);
          }
       }
    }
@@ -1981,24 +2052,11 @@ public final class ClickGuiRenderer {
          boolean hovered = ImGui.isItemHovered();
          float hover = AnubisWidgets.animate(ImGui.getItemID(), hovered, 18.0F);
          boolean selected = theme.matchesPreset(preset);
-         dl.addCircleFilled(
-            cx,
-            cy,
-            size * 0.5F - AnubisWidgets.s(3.0F),
-            AnubisWidgets.c(GuiPalette.abgr(preset.accent())),
-            MobilePerformance.uiSegments(32, size * 0.5F - AnubisWidgets.s(3.0F))
-         );
+         dl.addCircleFilled(cx, cy, size * 0.5F - AnubisWidgets.s(3.0F), AnubisWidgets.c(GuiPalette.abgr(preset.accent())), 32);
          if (selected) {
-            dl.addCircle(cx, cy, size * 0.5F, AnubisWidgets.c(-1), MobilePerformance.uiSegments(32, size * 0.5F), AnubisWidgets.s(1.5F));
+            dl.addCircle(cx, cy, size * 0.5F, AnubisWidgets.c(-1), 32, AnubisWidgets.s(1.5F));
          } else if (hover > 0.01F) {
-            dl.addCircle(
-               cx,
-               cy,
-               size * 0.5F,
-               AnubisWidgets.c(AnubisWidgets.withAlpha(-1, 0.35F * hover)),
-               MobilePerformance.uiSegments(32, size * 0.5F),
-               AnubisWidgets.s(1.2F)
-            );
+            dl.addCircle(cx, cy, size * 0.5F, AnubisWidgets.c(AnubisWidgets.withAlpha(-1, 0.35F * hover)), 32, AnubisWidgets.s(1.2F));
          }
 
          if (hovered) {
@@ -2122,7 +2180,7 @@ public final class ClickGuiRenderer {
                   float dcx = dx + del * 0.5F;
                   float dcy = dy + del * 0.5F;
                   int disc = armed ? -10856974 : AnubisTheme.lerpColor(AnubisWidgets.withAlpha(-16777216, 0.55F), GuiPalette.accent(), deleteHover);
-                  dl.addCircleFilled(dcx, dcy, del * 0.5F, AnubisWidgets.c(AnubisWidgets.withAlpha(disc, fade)), MobilePerformance.uiSegments(32, del * 0.5F));
+                  dl.addCircleFilled(dcx, dcy, del * 0.5F, AnubisWidgets.c(AnubisWidgets.withAlpha(disc, fade)), 32);
                   AnubisWidgets.cross(dl, dcx, dcy, AnubisWidgets.s(3.5F), AnubisWidgets.withAlpha(-1, fade));
                }
 
@@ -2353,9 +2411,7 @@ public final class ClickGuiRenderer {
    }
 
    public boolean handleEscape() {
-      if (AndroidSystemPicker.handleEscape()) {
-         return true;
-      } else if (this.listeningKeySetting != null) {
+      if (this.listeningKeySetting != null) {
          this.listeningKeySetting.setValue(-1);
          this.listeningKeySetting = null;
          this.listeningKeyFirstFrame = false;
@@ -2381,7 +2437,7 @@ public final class ClickGuiRenderer {
       long handle = MinecraftClient.getInstance().getWindow().getHandle();
 
       for (int key = 32; key <= 348; key++) {
-         if (AnubisKeys.getKey(handle, key) == 1) {
+         if (GLFW.glfwGetKey(handle, key) == 1) {
             return key;
          }
       }
@@ -2808,46 +2864,44 @@ public final class ClickGuiRenderer {
    }
 
    private void highlightHudElements() {
-      if (!AndroidSystemPicker.blocksEditor()) {
-         float mx = ImGui.getIO().getMousePosX();
-         float my = ImGui.getIO().getMousePosY();
-         boolean dragging = HudRenderer.getInstance().isDragging();
-         HudLayoutStore.HudElementState hovered = null;
-         if (!dragging && !hudStudioBlocked()) {
-            for (HudLayoutStore.HudElementState state : HudLayoutStore.getInstance().orderedElements()) {
-               if (state.positioned && contains(new float[]{state.x, state.y, state.width, state.height}, mx, my)) {
-                  hovered = state;
-               }
+      float mx = ImGui.getIO().getMousePosX();
+      float my = ImGui.getIO().getMousePosY();
+      boolean dragging = HudRenderer.getInstance().isDragging();
+      HudLayoutStore.HudElementState hovered = null;
+      if (!dragging && !hudStudioBlocked()) {
+         for (HudLayoutStore.HudElementState state : HudLayoutStore.getInstance().orderedElements()) {
+            if (state.positioned && contains(new float[]{state.x, state.y, state.width, state.height}, mx, my)) {
+               hovered = state;
             }
          }
+      }
 
-         ImDrawList under = ImGui.getBackgroundDrawList();
-         if (this.hudElementId != null) {
-            HudLayoutStore.HudElementState selected = findHudElementState(this.hudElementId);
-            if (selected != null) {
-               this.outlineHudElement(under, selected, AnubisWidgets.withAlpha(GuiPalette.accent(), 0.8F));
-            }
+      ImDrawList under = ImGui.getBackgroundDrawList();
+      if (this.hudElementId != null) {
+         HudLayoutStore.HudElementState selected = findHudElementState(this.hudElementId);
+         if (selected != null) {
+            this.outlineHudElement(under, selected, AnubisWidgets.withAlpha(GuiPalette.accent(), 0.8F));
+         }
+      }
+
+      if (hovered != null) {
+         if (!hovered.id.equals(this.hudElementId)) {
+            this.outlineHudElement(under, hovered, -2130706433);
          }
 
-         if (hovered != null) {
-            if (!hovered.id.equals(this.hudElementId)) {
-               this.outlineHudElement(under, hovered, -2130706433);
-            }
-
-            ImDrawList fg = ImGui.getForegroundDrawList();
-            Surface surface = HudTheme.get().forElementId(hovered.id);
-            String label = surface != null ? surface.label : HudRenderer.editorLabel(hovered.id);
-            String hint = label + "  ·  click to edit, drag to move, scroll to resize";
-            ImFont small = ImGuiManager.getInstance().smallFont();
-            float chipW = AnubisWidgets.textWidth(small, hint) + AnubisWidgets.s(18.0F);
-            float chipH = AnubisWidgets.lineHeight(small) + AnubisWidgets.s(10.0F);
-            float cx = Math.min(mx + AnubisWidgets.s(14.0F), ImGui.getIO().getDisplaySizeX() - chipW - AnubisWidgets.s(4.0F));
-            float cy = Math.min(my + AnubisWidgets.s(18.0F), ImGui.getIO().getDisplaySizeY() - chipH - AnubisWidgets.s(4.0F));
-            fg.addRectFilled(cx, cy, cx + chipW, cy + chipH, GuiPalette.accent(), chipH * 0.5F);
-            AnubisWidgets.text(fg, small, cx + AnubisWidgets.s(9.0F), cy + AnubisWidgets.s(5.0F), -1, hint);
-            if (ImGui.isMouseClicked(0) || ImGui.isMouseClicked(1)) {
-               this.selectHudElement(hovered.id);
-            }
+         ImDrawList fg = ImGui.getForegroundDrawList();
+         Surface surface = HudTheme.get().forElementId(hovered.id);
+         String label = surface != null ? surface.label : HudRenderer.editorLabel(hovered.id);
+         String hint = label + "  ·  click to edit, drag to move, scroll to resize";
+         ImFont small = ImGuiManager.getInstance().smallFont();
+         float chipW = AnubisWidgets.textWidth(small, hint) + AnubisWidgets.s(18.0F);
+         float chipH = AnubisWidgets.lineHeight(small) + AnubisWidgets.s(10.0F);
+         float cx = Math.min(mx + AnubisWidgets.s(14.0F), ImGui.getIO().getDisplaySizeX() - chipW - AnubisWidgets.s(4.0F));
+         float cy = Math.min(my + AnubisWidgets.s(18.0F), ImGui.getIO().getDisplaySizeY() - chipH - AnubisWidgets.s(4.0F));
+         fg.addRectFilled(cx, cy, cx + chipW, cy + chipH, GuiPalette.accent(), chipH * 0.5F);
+         AnubisWidgets.text(fg, small, cx + AnubisWidgets.s(9.0F), cy + AnubisWidgets.s(5.0F), -1, hint);
+         if (ImGui.isMouseClicked(0) || ImGui.isMouseClicked(1)) {
+            this.selectHudElement(hovered.id);
          }
       }
    }
@@ -3367,6 +3421,10 @@ public final class ClickGuiRenderer {
 
    @Environment(EnvType.CLIENT)
    private record CategoryPanel(ModuleCategory category, String id, String rowsId) {
+   }
+
+   @Environment(EnvType.CLIENT)
+   private record PanelLayout(List<String> ids, List<String> keys, List<Float> heights) {
    }
 
    @Environment(EnvType.CLIENT)

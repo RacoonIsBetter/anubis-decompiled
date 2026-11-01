@@ -1,46 +1,42 @@
 package net.anubis.client.module.impl.render;
 
+import java.awt.Color;
 import net.anubis.client.event.Stage;
 import net.anubis.client.event.impl.Render3DEvent;
 import net.anubis.client.event.impl.TickEvent;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
-import net.anubis.client.module.impl.client.PerformanceModule;
 import net.anubis.client.module.setting.BooleanSetting;
-import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.glyph.GlyphCanvas;
 import net.anubis.client.util.glyph.GlyphShapes;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.render.Frustum;
-import net.minecraft.util.math.random.Random;
-import net.minecraft.client.world.ClientWorld;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.util.math.ColorHelper;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos.Mutable;
 import net.minecraft.util.math.Direction.Axis;
+import net.minecraft.util.math.random.Random;
+import net.minecraft.util.shape.VoxelShape;
 
 @Environment(EnvType.CLIENT)
 public final class FloatingRelicsModule extends ClientModule {
-   private static final String SYMBOL_ANUBIS = "Anubis";
-   private static final String SYMBOL_LARP = "Larp";
-   private static final float[][] ANUBIS_GLYPHS = new float[][]{
-      RelicGlyphs.ANKH, RelicGlyphs.EYE, RelicGlyphs.SCARAB, RelicGlyphs.DJED, RelicGlyphs.FEATHER, RelicGlyphs.WAS
-   };
-   private static final float[] ANUBIS_FIT = new float[]{1.0F, 0.84F, 0.94F, 1.0F, 1.0F, 1.0F};
-   private static final float[][] LARP_GLYPHS = new float[][]{RelicGlyphs.DOLLAR, RelicGlyphs.EURO, RelicGlyphs.BITCOIN};
-   private static final float[] LARP_FIT = new float[]{1.0F, 0.92F, 0.96F};
-   private static final String COLOR_THEME = "Theme";
-   private static final String COLOR_MANUAL = "Manual";
+   private static final String COMET = "Comet";
+   private static final String FIREBALL = "Fireball";
+   private static final String RAINBOW = "Rainbow";
+   private static final String NEON = "Neon";
+   private static final String ELECTRIC = "Electric";
+   private static final String SAKURA = "Sakura";
+   private static final String VOID = "Void";
+   private static final String AURORA = "Aurora";
    private static final int MAX_RELICS = 32;
+   private static final int MAX_HISTORY = 62;
+   private static final int SMOOTHING = 3;
+   private static final int MAX_POINTS = 188;
    private static final float GRAVITY = 0.016F;
    private static final float BUOYANCY = 0.045F;
    private static final float AIR_DRAG = 0.982F;
@@ -50,55 +46,39 @@ public final class FloatingRelicsModule extends ClientModule {
    private static final float FOLLOW = 0.035F;
    private static final float WANDER = 0.003F;
    private static final float MAX_SPEED = 0.9F;
-   private static final float SPIN_SETTLE = 0.03F;
-   private static final float ANGLE_WRAP = 512.0F;
-   private static final float TILT_SPRING = 0.09F;
-   private static final float TILT_DAMP = 0.9F;
-   private static final float MAX_TILT = 0.55F;
    private static final int APPEAR_TICKS = 12;
    private static final int STAGGER_TICKS = 3;
-   private static final float GLYPH_SCALE = 1.25F;
-   private static final float THICKNESS = 0.07F;
-   private static final float SWAY = 0.12F;
-   private static final float BOB = 0.2F;
-   private static final float FACE_ALPHA = 0.94F;
-   private static final float BACK_ALPHA = 0.9F;
-   private static final float GLINT = 0.45F;
-   private static final float[] HALO_SCALES = new float[]{1.35F, 2.0F};
-   private static final float[] HALO_WEIGHTS = new float[]{1.0F, 0.5F};
-   private static final float HALO_PUSH = 0.6F;
-   private static final double DETAIL_RANGE_SQR = 576.0;
-   private static final float LIGHT_X;
-   private static final float LIGHT_Y;
-   private static final float LIGHT_Z;
+   private static final float[] GLOW_SCALES = new float[]{2.6F, 2.0F, 1.55F, 1.2F, 0.85F, 0.5F};
+   private static final float[] GLOW_ALPHAS = new float[]{0.035F, 0.05F, 0.08F, 0.13F, 0.3F, 0.95F};
+   private static final float[] PETAL = petal();
+   private static final float[] ROUND = round(24);
+   private static final float[] SOFT = round(16);
+   private static final float SOFT_BELOW = 0.1F;
    private static final long EPOCH = System.nanoTime();
-   private final ModeSetting symbols = this.addSetting("symbols", new ModeSetting("Symbols", "Anubis", "Anubis", "Larp"));
-   private final NumberSetting count = this.addSetting("count", new NumberSetting("Count", 9.0F, 1.0F, 32.0F).step(1.0F));
+   private final ModeSetting style = this.addSetting(
+      "style", new ModeSetting("Style", "Comet", "Comet", "Fireball", "Rainbow", "Neon", "Electric", "Sakura", "Void", "Aurora")
+   );
+   private final NumberSetting trailLength = this.addSetting("trail-length", new NumberSetting("Trail Length", 1.0F, 0.2F, 3.0F).step(0.1F));
+   private final NumberSetting count = this.addSetting("count", new NumberSetting("Count", 6.0F, 1.0F, 32.0F).step(1.0F));
    private final NumberSetting size = this.addSetting("size", new NumberSetting("Size", 0.3F, 0.15F, 0.75F).step(0.05F));
    private final NumberSetting spread = this.addSetting("spread", new NumberSetting("Spread", 2.6F, 1.2F, 6.0F).step(0.1F));
    private final NumberSetting bounce = this.addSetting("bounce", new NumberSetting("Bounce", 0.6F, 0.1F, 0.95F).step(0.05F));
    private final NumberSetting drift = this.addSetting("drift", new NumberSetting("Drift", 0.5F, 0.0F, 2.5F).step(0.1F));
-   private final NumberSetting spinSpeed = this.addSetting("spin", new NumberSetting("Spin", 1.0F, 0.2F, 3.0F).step(0.1F));
-   private final ModeSetting colorMode = this.addSetting("color", new ModeSetting("Color", "Theme", "Theme", "Manual"));
-   private final ColorSetting mainColor = this.addSetting("main-color", new ColorSetting("Main Color", -12614409));
-   private final ColorSetting secondColor = this.addSetting("second-color", new ColorSetting("Second Color", -14923108));
-   private final BooleanSetting halo = this.addSetting("halo", new BooleanSetting("Halo", true));
    private final BooleanSetting blocks = this.addSetting("block-bounce", new BooleanSetting("Block Bounce", true));
    private final FloatingRelicsModule.Relic[] relics = new FloatingRelicsModule.Relic[32];
    private final GlyphCanvas canvas = new GlyphCanvas();
    private final Random random = Random.create();
    private final Mutable cursor = new Mutable();
+   private final double[] points = new double[564];
+   private final double[] raw = new double[186];
+   private final double[] near = new double[3];
+   private final double[] far = new double[3];
    private int live;
    private int age;
    private ClientWorld boundLevel;
-   private int tintMain;
-   private int tintShade;
-   private int tintShine;
 
    public FloatingRelicsModule() {
-      super("floating-relics", "Floating Relics", "Egyptian symbols float and spin around you.", ModuleCategory.VISUALS);
-      this.mainColor.visibleWhen(() -> this.colorMode.is("Manual"));
-      this.secondColor.visibleWhen(() -> this.colorMode.is("Manual"));
+      super("floating-relics", "Floating Relics", "Glowing orbs float around you and leave a trail as they move.", ModuleCategory.VISUALS);
 
       for (int i = 0; i < 32; i++) {
          this.relics[i] = new FloatingRelicsModule.Relic();
@@ -137,7 +117,7 @@ public final class FloatingRelicsModule extends ClientModule {
       if (player != null && level != null) {
          this.syncLevel(level);
          this.age++;
-         int want = MobilePerformance.particles(Math.min(32, this.count.getInt()), 6);
+         int want = Math.min(32, this.count.getInt());
 
          for (int i = this.live; i < want; i++) {
             this.wake(this.relics[i], (i - this.live) * 3);
@@ -161,6 +141,12 @@ public final class FloatingRelicsModule extends ClientModule {
                this.knock(this.relics[i], this.relics[j], restitution);
             }
          }
+
+         for (int i = 0; i < this.live; i++) {
+            if (this.relics[i].placed) {
+               this.relics[i].remember();
+            }
+         }
       } else {
          this.reset();
       }
@@ -173,12 +159,6 @@ public final class FloatingRelicsModule extends ClientModule {
       r.lift = this.random.nextFloat();
       r.grain = 0.82F + 0.3F * this.random.nextFloat();
       r.phase = this.random.nextFloat() * (float) (Math.PI * 2);
-      r.restTurn = this.signed(0.07F, 0.12F);
-   }
-
-   private float signed(float min, float max) {
-      float value = min + (max - min) * this.random.nextFloat();
-      return this.random.nextBoolean() ? value : -value;
    }
 
    private void place(FloatingRelicsModule.Relic r, double px, double py, double pz) {
@@ -193,20 +173,15 @@ public final class FloatingRelicsModule extends ClientModule {
       r.vx = -MathHelper.sin(angle) * 0.03F;
       r.vy = 0.14F + 0.08F * this.random.nextFloat();
       r.vz = MathHelper.cos(angle) * 0.03F;
-      r.yaw = this.random.nextFloat() * (float) (Math.PI * 2);
-      r.lastYaw = r.yaw;
-      r.turn = r.restTurn * 3.0F;
-      r.tiltX = 0.0F;
-      r.tiltZ = 0.0F;
-      r.lastTiltX = 0.0F;
-      r.lastTiltZ = 0.0F;
-      r.swayX = this.signed(0.02F, 0.05F);
-      r.swayZ = this.signed(0.02F, 0.05F);
       r.placed = true;
       r.placedAt = this.age;
+      r.head = 0;
+      r.filled = 0;
    }
 
-   private void step(FloatingRelicsModule.Relic r, ClientWorld level, double px, double py, double pz, float height, float moveX, float moveZ, float restitution) {
+   private void step(
+      FloatingRelicsModule.Relic r, ClientWorld level, double px, double py, double pz, float height, float moveX, float moveZ, float restitution
+   ) {
       if (!r.placed) {
          if (this.age < r.wakeAt) {
             return;
@@ -255,7 +230,6 @@ public final class FloatingRelicsModule extends ClientModule {
          double next = r.x + r.vx;
          if (collide && this.solid(level, next + Math.copySign(half, r.vx), r.y, r.z)) {
             r.vx = -r.vx * restitution;
-            this.tumble(r, 0.6F);
          } else {
             r.x = next;
          }
@@ -268,7 +242,6 @@ public final class FloatingRelicsModule extends ClientModule {
             }
 
             r.vy = -r.vy * restitution;
-            this.tumble(r, 0.8F);
          } else {
             r.y = next;
          }
@@ -276,7 +249,6 @@ public final class FloatingRelicsModule extends ClientModule {
          next = r.z + r.vz;
          if (collide && this.solid(level, r.x, r.y, next + Math.copySign(half, r.vz))) {
             r.vz = -r.vz * restitution;
-            this.tumble(r, 0.6F);
          } else {
             r.z = next;
          }
@@ -286,20 +258,6 @@ public final class FloatingRelicsModule extends ClientModule {
             r.lastY = r.y;
             r.vy = Math.max(r.vy, 0.08F);
          }
-
-         if (Math.abs(r.yaw) > 512.0F) {
-            r.yaw %= (float) (Math.PI * 2);
-         }
-
-         r.lastYaw = r.yaw;
-         r.lastTiltX = r.tiltX;
-         r.lastTiltZ = r.tiltZ;
-         r.turn = r.turn + (r.restTurn * this.spinSpeed.get() - r.turn) * 0.03F;
-         r.yaw = r.yaw + r.turn;
-         r.swayX = (r.swayX - r.tiltX * 0.09F) * 0.9F;
-         r.swayZ = (r.swayZ - r.tiltZ * 0.09F) * 0.9F;
-         r.tiltX = MathHelper.clamp(r.tiltX + r.swayX, -0.55F, 0.55F);
-         r.tiltZ = MathHelper.clamp(r.tiltZ + r.swayZ, -0.55F, 0.55F);
       } else {
          this.place(r, px, py, pz);
       }
@@ -333,17 +291,9 @@ public final class FloatingRelicsModule extends ClientModule {
                b.vx += impulse * nx;
                b.vy += impulse * ny;
                b.vz += impulse * nz;
-               this.tumble(a, 0.5F);
-               this.tumble(b, 0.5F);
             }
          }
       }
-   }
-
-   private void tumble(FloatingRelicsModule.Relic r, float strength) {
-      r.turn = r.turn + (this.random.nextFloat() - 0.5F) * 0.3F * strength;
-      r.swayX = r.swayX + (this.random.nextFloat() - 0.5F) * 0.12F * strength;
-      r.swayZ = r.swayZ + (this.random.nextFloat() - 0.5F) * 0.12F * strength;
    }
 
    private boolean solid(ClientWorld level, double x, double y, double z) {
@@ -376,35 +326,20 @@ public final class FloatingRelicsModule extends ClientModule {
             this.canvas.begin(mc.gameRenderer.getCamera());
             float pt = event.partialTick;
             float time = (float)(System.nanoTime() - EPOCH) / 1.0E9F;
-            boolean mobile = MobilePerformance.active();
-            Frustum frustum = !PerformanceModule.frustumCulling() && !mobile ? null : event.frustum;
-            float base = this.size.get() * 0.5F * 1.25F;
-            boolean larp = this.symbols.is("Larp");
-            float[][] glyphs = larp ? LARP_GLYPHS : ANUBIS_GLYPHS;
-            float[] fits = larp ? LARP_FIT : ANUBIS_FIT;
-            boolean glow = this.halo.get();
-            this.tint();
+            int samples = Math.max(2, Math.min(60, Math.round(this.trailLength.get() * 20.0F)));
+            String look = this.style.get();
 
             for (int i = 0; i < this.live; i++) {
                FloatingRelicsModule.Relic r = this.relics[i];
                if (r.placed) {
-                  int kind = i % glyphs.length;
                   float since = this.age - r.placedAt + pt;
-                  float extent = base * r.grain * fits[kind] * appear(since / 12.0F);
+                  float grow = appear(since / 12.0F);
+                  float extent = this.size.get() * 0.5F * r.grain * grow;
                   if (!(extent < 0.004F)) {
-                     double x = MathHelper.lerp(pt, r.lastX, r.x);
-                     double y = MathHelper.lerp(pt, r.lastY, r.y) + extent * 0.2F * MathHelper.sin(time * 2.4F + r.phase * 3.0F);
-                     double z = MathHelper.lerp(pt, r.lastZ, r.z);
-                     double reach = renderReach(extent, glow, mobile);
-                     if (frustum == null || frustum.isVisible(new Box(x - reach, y - reach, z - reach, x + reach, y + reach, z + reach))) {
-                        float fade = Math.min(1.0F, since / 7.2000003F);
-                        float yaw = MathHelper.lerp(pt, r.lastYaw, r.yaw);
-                        float tiltX = MathHelper.lerp(pt, r.lastTiltX, r.tiltX) + 0.12F * MathHelper.sin(time * 1.3F + r.phase);
-                        float tiltZ = MathHelper.lerp(pt, r.lastTiltZ, r.tiltZ) + 0.12F * MathHelper.sin(time * 0.9F + r.phase * 2.3F);
-                        float shimmer = glow ? (0.1F + 0.07F * MathHelper.sin(time * 2.1F + r.phase)) * fade : 0.0F;
-                        float[] glyph = mobile ? RelicGlyphs.mobile(glyphs[kind]) : glyphs[kind];
-                        this.drawRelic(glyph, x, y, z, extent, yaw, tiltX, tiltZ, fade, shimmer);
-                     }
+                     int n = this.trail(r, pt, samples);
+                     this.drawTrail(look, i, n, extent, time);
+                     int h = (n - 1) * 3;
+                     this.drawHead(look, this.points[h], this.points[h + 1], this.points[h + 2], extent, time, r.phase);
                   }
                }
             }
@@ -414,85 +349,345 @@ public final class FloatingRelicsModule extends ClientModule {
       }
    }
 
-   private static double renderReach(float extent, boolean halo, boolean mobile) {
-      return extent * (mobile && halo ? HALO_SCALES[HALO_SCALES.length - 1] + 0.6F : 2.0);
-   }
-
-   private void tint() {
-      if (this.colorMode.is("Manual")) {
-         this.tintMain = ColorHelper.fullAlpha(this.mainColor.argb());
-         this.tintShade = ColorHelper.fullAlpha(this.secondColor.argb());
-      } else {
-         this.tintMain = CosmeticAccent.argb();
-         this.tintShade = ColorHelper.scaleRgb(this.tintMain, 0.45F);
+   private int trail(FloatingRelicsModule.Relic r, float pt, int samples) {
+      int m = Math.min(r.filled, samples + 2);
+      if (m < 2) {
+         this.points[0] = MathHelper.lerp(pt, r.lastX, r.x);
+         this.points[1] = MathHelper.lerp(pt, r.lastY, r.y);
+         this.points[2] = MathHelper.lerp(pt, r.lastZ, r.z);
+         return 1;
       }
 
-      this.tintShine = ColorHelper.lerp(0.6F, this.tintMain, -1);
+      for (int k = 0; k < m; k++) {
+         int slot = Math.floorMod(r.head - m + k, 62) * 3;
+         this.raw[k * 3] = r.history[slot];
+         this.raw[k * 3 + 1] = r.history[slot + 1];
+         this.raw[k * 3 + 2] = r.history[slot + 2];
+      }
+
+      double head = m - 2 + pt;
+      double tail = Math.max(0.0, head - samples);
+      int n = Math.max(2, (int)Math.ceil((head - tail) * 3.0) + 1);
+
+      for (int j = 0; j < n; j++) {
+         double u = j == n - 1 ? head : tail + (head - tail) * j / (n - 1);
+         int k = Math.min(m - 2, (int)u);
+         double t = u - k;
+         int k0 = Math.max(0, k - 1) * 3;
+         int k1 = k * 3;
+         int k2 = (k + 1) * 3;
+         int k3 = Math.min(m - 1, k + 2) * 3;
+
+         for (int axis = 0; axis < 3; axis++) {
+            this.points[j * 3 + axis] = catmull(this.raw[k0 + axis], this.raw[k1 + axis], this.raw[k2 + axis], this.raw[k3 + axis], t);
+         }
+      }
+
+      return n;
    }
 
-   private void drawRelic(float[] glyph, double x, double y, double z, float extent, float yaw, float tiltX, float tiltZ, float fade, float shimmer) {
-      float cy = MathHelper.cos(yaw);
-      float sy = MathHelper.sin(yaw);
-      float cx = MathHelper.cos(tiltX);
-      float sx = MathHelper.sin(tiltX);
-      float cz = MathHelper.cos(tiltZ);
-      float sz = MathHelper.sin(tiltZ);
-      float ux = cy * cz + sy * sx * sz;
-      float uy = cx * sz;
-      float uz = -sy * cz + cy * sx * sz;
-      float vx = -cy * sz + sy * sx * cz;
-      float vy = cx * cz;
-      float vz = sy * sz + cy * sx * cz;
-      float nx = sy * cx;
-      float ny = -sx;
-      float nz = cy * cx;
-      double tx = this.canvas.camX() - x;
-      double ty = this.canvas.camY() - y;
-      double tz = this.canvas.camZ() - z;
-      double distSqr = tx * tx + ty * ty + tz * tz;
-      if (!(distSqr < 1.0E-8)) {
-         double dist = Math.sqrt(distSqr);
-         float facing = (float)((nx * tx + ny * ty + nz * tz) / dist);
-         if (facing < 0.0F) {
-            ux = -ux;
-            uy = -uy;
-            uz = -uz;
-            nx = -nx;
-            ny = -ny;
-            nz = -nz;
-            facing = -facing;
-         }
+   private static double catmull(double p0, double p1, double p2, double p3, double t) {
+      double t2 = t * t;
+      double t3 = t2 * t;
+      return 0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3);
+   }
 
-         if (shimmer > 0.0F) {
-            double push = extent * 0.6F / dist;
-            double hx = x - tx * push;
-            double hy = y - ty * push;
-            double hz = z - tz * push;
-            float[] haloShape = MobilePerformance.active() ? GlyphShapes.OCTAGON : GlyphShapes.DISK;
+   private void drawTrail(String look, int relic, int n, float extent, float time) {
+      if (n >= 2) {
+         float width = extent * 0.7F;
 
-            for (int layer = 0; layer < HALO_SCALES.length; layer++) {
-               this.canvas.sprite(haloShape, hx, hy, hz, extent * HALO_SCALES[layer], 0.0F, withAlpha(this.tintMain, shimmer * HALO_WEIGHTS[layer]));
+         for (int k = 1; k < n; k++) {
+            float t = (float)k / (n - 1);
+            float tb = (float)(k - 1) / (n - 1);
+            int a = (k - 1) * 3;
+            int b = k * 3;
+            int back = n - 1 - k;
+            double ax = this.points[a];
+            double ay = this.points[a + 1];
+            double az = this.points[a + 2];
+            double bx = this.points[b];
+            double by = this.points[b + 1];
+            double bz = this.points[b + 2];
+            switch (look) {
+               case "Fireball":
+                  if (back % 3 == 0) {
+                     int colx = lerpRgb(13114880, 16760896, t);
+                     this.glowDisk(bx, by, bz, extent * (0.35F + 0.8F * t), colx, 0.55F * t * t);
+                  }
+
+                  if (back % 4 == 0) {
+                     long seedx = relic * 7919L + back * 104729L + (long)(time * 6.0F);
+                     double sx = bx + jitter(seedx, 1) * extent * 1.6;
+                     double sy = by + jitter(seedx, 2) * extent + (1.0F - t) * extent * 2.4;
+                     double sz = bz + jitter(seedx, 3) * extent * 1.6;
+                     this.canvas.sprite(GlyphShapes.DISK, sx, sy, sz, extent * 0.09F, 0.0F, withAlpha(16765562, 0.9F * t));
+                  }
+                  break;
+               case "Rainbow": {
+                  int col = Color.HSBtoRGB(t * 0.85F - time * 0.25F, 0.85F, 1.0F) & 16777215;
+                  this.strip(ax, ay, az, bx, by, bz, width * tb, width * t, withAlpha(col, 0.92F * t));
+                  break;
+               }
+               case "Neon": {
+                  int col = lerpRgb(16728018, 4190975, t);
+                  this.strip(ax, ay, az, bx, by, bz, width * 1.5F * tb, width * 1.5F * t, withAlpha(col, 0.22F * t));
+                  this.strip(ax, ay, az, bx, by, bz, width * 0.6F * tb, width * 0.6F * t, withAlpha(col, 0.8F * t));
+                  this.strip(ax, ay, az, bx, by, bz, width * 0.18F, width * 0.18F, withAlpha(16777215, 0.9F * t));
+                  break;
+               }
+               case "Electric":
+                  long seed = relic * 7919L + back * 104729L + (long)(time * 14.0F);
+                  jag(this.far, ax, ay, az, seed + 104729L, extent * 0.7 * (1.0F - tb * 0.5F));
+                  jag(this.near, bx, by, bz, seed, extent * 0.7 * (1.0F - t * 0.5F));
+                  this.strip(
+                     this.far[0], this.far[1], this.far[2], this.near[0], this.near[1], this.near[2], width * 0.6F, width * 0.6F, withAlpha(6273023, 0.3F * t)
+                  );
+                  this.strip(
+                     this.far[0],
+                     this.far[1],
+                     this.far[2],
+                     this.near[0],
+                     this.near[1],
+                     this.near[2],
+                     width * 0.16F,
+                     width * 0.16F,
+                     withAlpha(15136511, 0.95F * t)
+                  );
+                  break;
+               case "Sakura":
+                  if (back % 6 == 0) {
+                     long seedx = relic * 7919L + back * 104729L;
+                     double fall = (1.0F - t) * extent * 3.0;
+                     bx += jitter(seedx, 1) * extent * (1.4F - t);
+                     bz += jitter(seedx, 3) * extent * (1.4F - t);
+                     float spin = time * 2.1F + back * 0.7F + relic;
+                     this.canvas.sprite(PETAL, bx, by - fall, bz, extent * (0.45F + 0.45F * t), spin, withAlpha(lerpRgb(16770286, 16748472, t), 0.95F * t));
+                  }
+                  break;
+               case "Void":
+                  for (int strand = 0; strand < 2; strand++) {
+                     helix(this.far, ax, ay, az, bx, by, bz, tb, time, strand, extent);
+                     helix(this.near, bx, by, bz, bx + (bx - ax), by + (by - ay), bz + (bz - az), t, time, strand, extent);
+                     int colx = strand == 0 ? 12472575 : 16729800;
+                     this.strip(
+                        this.far[0],
+                        this.far[1],
+                        this.far[2],
+                        this.near[0],
+                        this.near[1],
+                        this.near[2],
+                        width * 0.32F,
+                        width * 0.32F,
+                        withAlpha(colx, 0.85F * t)
+                     );
+                  }
+                  break;
+               case "Aurora": {
+                  int col = lerpRgb(4194208, 11558911, 0.5F + 0.5F * MathHelper.sin(t * 6.0F + time * 1.5F));
+                  float shimmer = 0.45F + 0.55F * Math.abs(MathHelper.sin(k * 0.9F + time * 3.0F));
+                  double tall = extent * 3.2 * t * (0.7F + 0.3F * shimmer);
+                  this.curtain(ax, ay, az, bx, by, bz, extent * 3.2 * tb * 0.5, tall * 0.5, 0.0, withAlpha(col, 0.5F * t * shimmer));
+                  this.curtain(ax, ay, az, bx, by, bz, extent * 3.2 * tb, tall, extent * 3.2 * tb * 0.5, withAlpha(col, 0.16F * t * shimmer), tall * 0.5);
+                  break;
+               }
+               default: {
+                  int col = lerpRgb(4160511, 13625599, t);
+                  this.strip(ax, ay, az, bx, by, bz, width * 1.9F * tb, width * 1.9F * t, withAlpha(col, 0.16F * t * t));
+                  this.strip(ax, ay, az, bx, by, bz, width * tb, width * t, withAlpha(col, 0.75F * t * t));
+               }
             }
          }
+      }
+   }
 
-         double au = ux * extent;
-         double bu = uy * extent;
-         double cu = uz * extent;
-         double av = vx * extent;
-         double bv = vy * extent;
-         double cv = vz * extent;
-         double depth = extent * 0.07F;
-         if (distSqr < 576.0 && facing < 0.995F) {
-            this.canvas.shape(glyph, x - nx * depth, y - ny * depth, z - nz * depth, au, bu, cu, av, bv, cv, withAlpha(this.tintShade, 0.9F * fade));
+   private void drawHead(String look, double x, double y, double z, float extent, float time, float phase) {
+      switch (look) {
+         case "Fireball":
+            this.glow(x, y, z, extent * 1.1F, 16742938, 0.9F);
+            this.glowDisk(x, y, z, extent * 0.45F, 16773808, 1.0F);
+            break;
+         case "Rainbow":
+         case "Neon":
+            this.glow(x, y, z, extent * 0.9F, 16777215, 1.0F);
+            break;
+         case "Electric":
+            this.glow(x, y, z, extent * 1.1F, 6273023, 0.9F);
+            this.glowDisk(x, y, z, extent * 0.4F, 16777215, 1.0F);
+            break;
+         case "Sakura":
+            this.glow(x, y, z, extent * 0.9F, 16757713, 0.8F);
+            this.canvas.sprite(PETAL, x, y, z, extent * 0.85F, time * 1.6F + phase, withAlpha(16751812, 1.0F));
+            break;
+         case "Void":
+            this.glow(x, y, z, extent * 1.2F, 10174463, 0.85F);
+            this.canvas.sprite(GlyphShapes.HALO, x, y, z, extent * 0.62F, time * 2.0F, withAlpha(14456575, 0.95F));
+            this.canvas.sprite(GlyphShapes.DISK, x, y, z, extent * 0.5F, 0.0F, withAlpha(656400, 1.0F));
+            break;
+         case "Aurora":
+            this.glow(x, y, z, extent * 0.8F, 13697000, 1.0F);
+            break;
+         default:
+            this.glow(x, y, z, extent * 1.2F, 9422079, 0.85F);
+            this.glowDisk(x, y, z, extent * 0.38F, 16777215, 1.0F);
+      }
+   }
+
+   private void glow(double x, double y, double z, float radius, int rgb, float alpha) {
+      for (int layer = 0; layer < GLOW_SCALES.length; layer++) {
+         int col = layer == GLOW_SCALES.length - 1 ? lerpRgb(rgb, 16777215, 0.6F) : rgb;
+         float[] disk = GLOW_ALPHAS[layer] < 0.1F ? SOFT : ROUND;
+         this.canvas.sprite(disk, x, y, z, radius * GLOW_SCALES[layer], 0.0F, withAlpha(col, alpha * GLOW_ALPHAS[layer]));
+      }
+   }
+
+   private void glowDisk(double x, double y, double z, float radius, int rgb, float alpha) {
+      this.canvas.sprite(SOFT, x, y, z, radius * 1.6F, 0.0F, withAlpha(rgb, alpha * 0.25F));
+      this.canvas.sprite(ROUND, x, y, z, radius, 0.0F, withAlpha(rgb, alpha));
+   }
+
+   private void strip(double ax, double ay, double az, double bx, double by, double bz, float wa, float wb, int argb) {
+      if (!(wa <= 0.0F) || !(wb <= 0.0F)) {
+         double dx = bx - ax;
+         double dy = by - ay;
+         double dz = bz - az;
+         double tx = this.canvas.camX() - (ax + bx) * 0.5;
+         double ty = this.canvas.camY() - (ay + by) * 0.5;
+         double tz = this.canvas.camZ() - (az + bz) * 0.5;
+         double sx = dy * tz - dz * ty;
+         double sy = dz * tx - dx * tz;
+         double sz = dx * ty - dy * tx;
+         double length = Math.sqrt(sx * sx + sy * sy + sz * sz);
+         if (!(length < 1.0E-9)) {
+            sx /= length;
+            sy /= length;
+            sz /= length;
+            this.canvas
+               .quad(
+                  ax + sx * wa,
+                  ay + sy * wa,
+                  az + sz * wa,
+                  bx + sx * wb,
+                  by + sy * wb,
+                  bz + sz * wb,
+                  bx - sx * wb,
+                  by - sy * wb,
+                  bz - sz * wb,
+                  ax - sx * wa,
+                  ay - sy * wa,
+                  az - sz * wa,
+                  argb
+               );
+         }
+      }
+   }
+
+   private void curtain(double ax, double ay, double az, double bx, double by, double bz, double topA, double topB, double base, int argb) {
+      this.curtain(ax, ay, az, bx, by, bz, topA, topB, base, argb, base);
+   }
+
+   private void curtain(double ax, double ay, double az, double bx, double by, double bz, double topA, double topB, double baseA, int argb, double baseB) {
+      if (!(topA <= baseA) || !(topB <= baseB)) {
+         this.canvas.quad(ax, ay + baseA, az, bx, by + baseB, bz, bx, by + topB, bz, ax, ay + topA, az, argb);
+         this.canvas.quad(ax, ay + topA, az, bx, by + topB, bz, bx, by + baseB, bz, ax, ay + baseA, az, argb);
+      }
+   }
+
+   private static void jag(double[] out, double x, double y, double z, long seed, double reach) {
+      out[0] = x + jitter(seed, 1) * reach;
+      out[1] = y + jitter(seed, 2) * reach;
+      out[2] = z + jitter(seed, 3) * reach;
+   }
+
+   private static void helix(double[] out, double ax, double ay, double az, double bx, double by, double bz, float t, float time, int strand, float extent) {
+      double dx = bx - ax;
+      double dy = by - ay;
+      double dz = bz - az;
+      double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (length < 1.0E-9) {
+         out[0] = ax;
+         out[1] = ay;
+         out[2] = az;
+      } else {
+         dx /= length;
+         dy /= length;
+         dz /= length;
+         double ux = -dz;
+         double uy = 0.0;
+         double uz = dx;
+         double ul = Math.sqrt(ux * ux + uz * uz);
+         if (ul < 1.0E-6) {
+            ux = 1.0;
+            uz = 0.0;
+            ul = 1.0;
          }
 
-         float light = Math.max(0.0F, nx * LIGHT_X + ny * LIGHT_Y + nz * LIGHT_Z);
-         float glint = facing * facing;
-         glint *= glint;
-         glint *= glint;
-         int face = ColorHelper.lerp(glint * 0.45F, ColorHelper.scaleRgb(this.tintMain, 0.6F + 0.22F * light + 0.18F * facing), this.tintShine);
-         this.canvas.shape(glyph, x + nx * depth, y + ny * depth, z + nz * depth, au, bu, cu, av, bv, cv, withAlpha(face, 0.94F * fade));
+         ux /= ul;
+         uz /= ul;
+         double vx = dy * uz - dz * uy;
+         double vy = dz * ux - dx * uz;
+         double vz = dx * uy - dy * ux;
+         double angle = t * 9.0 + time * 4.0 + strand * Math.PI;
+         double radius = extent * (0.9 - 0.5 * t);
+         double c = Math.cos(angle) * radius;
+         double s = Math.sin(angle) * radius;
+         out[0] = ax + ux * c + vx * s;
+         out[1] = ay + uy * c + vy * s;
+         out[2] = az + uz * c + vz * s;
       }
+   }
+
+   private static double jitter(long seed, int axis) {
+      long h = seed * -7046029254386353131L + axis * -4417276706812531889L;
+      h ^= h >>> 31;
+      h *= -4658895280553007687L;
+      h ^= h >>> 29;
+      return (h >>> 11) / 9.007199E15F * 2.0 - 1.0;
+   }
+
+   private static float[] round(int segments) {
+      float[] out = new float[segments / 2 * 8];
+
+      for (int k = 0; k < segments; k += 2) {
+         int o = k / 2 * 8;
+
+         for (int v = 0; v < 3; v++) {
+            float angle = (k + v) * (float) (Math.PI * 2) / segments;
+            out[o + 2 + v * 2] = MathHelper.cos(angle);
+            out[o + 3 + v * 2] = MathHelper.sin(angle);
+         }
+      }
+
+      return out;
+   }
+
+   private static float[] petal() {
+      int n = 16;
+      double[] px = new double[n];
+      double[] py = new double[n];
+
+      for (int k = 0; k < n; k++) {
+         double t = (double)k / n * Math.PI * 2.0;
+         double notch = 1.0 - 0.28 * Math.pow(Math.max(0.0, Math.cos(t - (Math.PI / 2))), 12.0);
+         px[k] = Math.cos(t) * 0.62 * (0.75 + 0.25 * Math.sin(t)) * notch;
+         py[k] = Math.sin(t) * notch;
+      }
+
+      float[] out = new float[n * 8];
+
+      for (int k = 0; k < n; k++) {
+         int j = (k + 1) % n;
+         int o = k * 8;
+         out[o] = 0.0F;
+         out[o + 1] = 0.0F;
+         out[o + 2] = (float)px[k];
+         out[o + 3] = (float)py[k];
+         out[o + 4] = (float)px[j];
+         out[o + 5] = (float)py[j];
+         out[o + 6] = (float)px[j];
+         out[o + 7] = (float)py[j];
+      }
+
+      return out;
    }
 
    private static float appear(float t) {
@@ -508,19 +703,17 @@ public final class FloatingRelicsModule extends ClientModule {
       return 1.0F - inv * inv * inv + 0.22F * MathHelper.sin(t * (float) Math.PI) * inv;
    }
 
+   private static int lerpRgb(int a, int b, float t) {
+      t = MathHelper.clamp(t, 0.0F, 1.0F);
+      int r = (int)((a >> 16 & 0xFF) + ((b >> 16 & 0xFF) - (a >> 16 & 0xFF)) * t);
+      int g = (int)((a >> 8 & 0xFF) + ((b >> 8 & 0xFF) - (a >> 8 & 0xFF)) * t);
+      int bl = (int)((a & 0xFF) + ((b & 0xFF) - (a & 0xFF)) * t);
+      return r << 16 | g << 8 | bl;
+   }
+
    private static int withAlpha(int rgb, float alpha) {
       int a = (int)(Math.max(0.0F, Math.min(1.0F, alpha)) * 255.0F + 0.5F);
       return a << 24 | rgb & 16777215;
-   }
-
-   static {
-      float lx = 0.32F;
-      float ly = 0.87F;
-      float lz = 0.37F;
-      float length = (float)Math.sqrt(lx * lx + ly * ly + lz * lz);
-      LIGHT_X = lx / length;
-      LIGHT_Y = ly / length;
-      LIGHT_Z = lz / length;
    }
 
    @Environment(EnvType.CLIENT)
@@ -534,16 +727,6 @@ public final class FloatingRelicsModule extends ClientModule {
       float vx;
       float vy;
       float vz;
-      float yaw;
-      float lastYaw;
-      float turn;
-      float restTurn;
-      float tiltX;
-      float tiltZ;
-      float lastTiltX;
-      float lastTiltZ;
-      float swayX;
-      float swayZ;
       float orbit;
       float lift;
       float grain;
@@ -551,5 +734,16 @@ public final class FloatingRelicsModule extends ClientModule {
       boolean placed;
       int wakeAt;
       int placedAt;
+      final double[] history = new double[186];
+      int head;
+      int filled;
+
+      void remember() {
+         this.history[this.head * 3] = this.x;
+         this.history[this.head * 3 + 1] = this.y;
+         this.history[this.head * 3 + 2] = this.z;
+         this.head = (this.head + 1) % 62;
+         this.filled = Math.min(62, this.filled + 1);
+      }
    }
 }

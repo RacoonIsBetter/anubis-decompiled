@@ -7,16 +7,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.LoreComponent;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
-import net.minecraft.component.type.LoreComponent;
-import net.minecraft.component.DataComponentTypes;
 
 @Environment(EnvType.CLIENT)
 final class ServerText {
    private static final Pattern FORMATTING = Pattern.compile("§.");
    private static final Pattern MONEY_EXACT = Pattern.compile("^\\$?\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*([kmb])?$");
    private static final Pattern MONEY_ANY = Pattern.compile("\\$?[ \\t]*([0-9][0-9,]*(?:\\.[0-9]+)?)[ \\t]*([kmb])?(?![a-z])");
+   private static final Pattern DOLLARS = Pattern.compile("\\$[ \\t]*([0-9][0-9,]*(?:\\.[0-9]+)?)[ \\t]*([kmb])?(?![a-z])");
+   private static final String[] NOT_PRICES = new String[]{"balance", "you have", "your money", "wallet", "bank"};
    private static final String SMALL_CAPS = "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘʀѕꜱᴛᴜᴠᴡʏᴢ";
    private static final String SMALL_CAPS_PLAIN = "abcdefghijklmnoprsstuvwyz";
    private static final String[] ROMAN = new String[]{"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"};
@@ -90,6 +92,54 @@ final class ServerText {
       }
 
       return out;
+   }
+
+   static List<Double> dollars(String raw) {
+      List<Double> out = new ArrayList<>();
+      if (raw == null) {
+         return out;
+      }
+
+      Matcher matcher = DOLLARS.matcher(normalize(raw));
+
+      while (matcher.find()) {
+         double value = scale(matcher.group(1), matcher.group(2));
+         if (value > 0.0) {
+            out.add(value);
+         }
+      }
+
+      return out;
+   }
+
+   static double askingPrice(List<String> lines) {
+      double worst = -1.0;
+
+      for (String line : lines) {
+         String clean = normalize(line);
+         boolean skip = false;
+
+         for (String word : NOT_PRICES) {
+            if (clean.contains(word)) {
+               skip = true;
+               break;
+            }
+         }
+
+         if (!skip) {
+            for (double value : clean.contains("$") ? dollars(clean) : (!clean.contains("price") && !clean.contains("cost") ? List.<Double>of() : moneyAll(clean))) {
+               if (value > worst) {
+                  worst = value;
+               }
+            }
+         }
+      }
+
+      return worst;
+   }
+
+   static double askingPrice(ItemStack stack) {
+      return askingPrice(lore(stack));
    }
 
    static String moneyToken(String raw) {
@@ -182,7 +232,7 @@ final class ServerText {
    static List<String> lore(ItemStack stack) {
       List<String> out = new ArrayList<>();
 
-      for (Text line : ((LoreComponent)stack.getOrDefault(DataComponentTypes.LORE, LoreComponent.DEFAULT)).lines()) {
+      for (Text line : stack.getOrDefault(DataComponentTypes.LORE, LoreComponent.DEFAULT).lines()) {
          out.add(line.getString());
       }
 
@@ -191,34 +241,41 @@ final class ServerText {
 
    static double listingPrice(ItemStack stack) {
       List<String> lore = lore(stack);
-      double best = -1.0;
+
+      for (String line : lore) {
+         String clean = withoutBullet(normalize(line));
+         if (clean.startsWith("price")) {
+            List<Double> values = clean.contains("$") ? dollars(clean) : moneyAll(clean.substring("price".length()));
+            return values.isEmpty() ? -1.0 : values.get(0);
+         }
+      }
+
+      double found = -1.0;
 
       for (String line : lore) {
          String clean = normalize(line);
-         if (clean.contains("price") || clean.contains("cost") || clean.contains("buy")) {
-            for (double value : moneyAll(line)) {
-               if (value >= 100.0 && (best < 0.0 || value < best)) {
-                  best = value;
+         if (clean.contains("$") && !clean.contains("balance")) {
+            for (double value : dollars(clean)) {
+               if (found > 0.0 && Math.abs(found - value) >= 1.0) {
+                  return -1.0;
                }
+
+               found = value;
             }
          }
       }
 
-      if (best > 0.0) {
-         return best;
+      return found;
+   }
+
+   private static String withoutBullet(String text) {
+      int start = 0;
+
+      while (start < text.length() && !Character.isLetterOrDigit(text.charAt(start))) {
+         start++;
       }
 
-      for (String line : lore) {
-         if (line.contains("$")) {
-            for (double value : moneyAll(line)) {
-               if (value >= 100.0 && (best < 0.0 || value < best)) {
-                  best = value;
-               }
-            }
-         }
-      }
-
-      return best;
+      return text.substring(start);
    }
 
    static double orderPrice(ItemStack stack) {

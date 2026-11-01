@@ -1,10 +1,9 @@
 package net.anubis.client.input;
 
-import imgui.glfw.AnubisKeys;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.util.Window;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.client.util.Window;
 
 @Environment(EnvType.CLIENT)
 public final class AnubisKeyPolling {
@@ -12,6 +11,6 @@ public final class AnubisKeyPolling {
    }
 
    public static boolean isKeyDown(Window window, int key) {
-      return AnubisKeys.isAndroid() ? AnubisKeys.getKey(window.getHandle(), key) == 1 : InputUtil.isKeyPressed(window, key);
+      return InputUtil.isKeyPressed(window, key);
    }
 }

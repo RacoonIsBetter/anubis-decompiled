@@ -3,29 +3,29 @@ package net.anubis.client.module.impl.render;
 import net.anubis.client.event.EventPriority;
 import net.anubis.client.event.Stage;
 import net.anubis.client.event.impl.PlayerAttackEntityEvent;
+import net.anubis.client.gui.ThemeTint;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.Box;
 import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.particle.ParticleEffect;
 import net.minecraft.particle.ParticleTypes;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.random.Random;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.ClientPlayerEntity;
 
 @Environment(EnvType.CLIENT)
 public final class HitParticlesModule extends ClientModule {
@@ -46,6 +46,7 @@ public final class HitParticlesModule extends ClientModule {
    private static final String COLOR_CUSTOM = "Custom";
    private static final String COLOR_ACCENT = "Accent";
    private static final double LIFT = 0.25;
+   private static final int PEEP_DUST = 16743112;
    private final ModeSetting type = this.addSetting(
       "type", new ModeSetting("Type", "Crit", "Crit", "Magic Crit", "Spark", "Flame", "Soul Flame", "End Rod", "Totem", "Heart", "Dust")
    );
@@ -116,7 +117,9 @@ public final class HitParticlesModule extends ClientModule {
       Vec3d fallbackOut = player.getRotationVector().negate();
       double spreadScale = this.spread.get();
       double jitter = burst.jitter() * spreadScale;
-      int count = MobilePerformance.particles(this.amount.getInt(), 3);
+      int count = this.amount.getInt();
+      float pink = this.type.is("Dust") ? 0.0F : ThemeTint.world();
+      ParticleEffect pinkDust = pink > 0.0F ? new DustParticleEffect(16743112, 0.9F) : null;
 
       for (int i = 0; i < count; i++) {
          Vec3d from = body ? this.randomPointIn(box) : impact;
@@ -124,8 +127,9 @@ public final class HitParticlesModule extends ClientModule {
          out = out.lengthSquared() < 1.0E-6 ? fallbackOut : out.normalize();
          Vec3d dir = out.multiply(0.8).add(this.randomUnit()).add(0.0, 0.25, 0.0).normalize();
          double speed = burst.speed() * spreadScale * (0.6 + 0.4 * this.random.nextDouble());
+         ParticleEffect particle = pinkDust != null && this.random.nextFloat() < pink ? pinkDust : burst.particle();
          level.addParticleClient(
-            burst.particle(),
+            particle,
             true,
             false,
             from.x + this.random.nextGaussian() * jitter,
@@ -153,7 +157,7 @@ public final class HitParticlesModule extends ClientModule {
    }
 
    private int dustRgb() {
-      int argb = this.dustColorMode.is("Accent") ? CosmeticAccent.argb() : this.dustColor.argb();
+      int argb = this.dustColorMode.is("Accent") ? CosmeticAccent.argb() : ThemeTint.world(this.dustColor.argb());
       return argb & 16777215;
    }
 
@@ -162,11 +166,7 @@ public final class HitParticlesModule extends ClientModule {
          return hit.getPos();
       } else {
          Vec3d eye = player.getEyePos();
-         return new Vec3d(
-            MathHelper.clamp(eye.x, box.minX, box.maxX),
-            MathHelper.clamp(eye.y, box.minY, box.maxY),
-            MathHelper.clamp(eye.z, box.minZ, box.maxZ)
-         );
+         return new Vec3d(MathHelper.clamp(eye.x, box.minX, box.maxX), MathHelper.clamp(eye.y, box.minY, box.maxY), MathHelper.clamp(eye.z, box.minZ, box.maxZ));
       }
    }
 

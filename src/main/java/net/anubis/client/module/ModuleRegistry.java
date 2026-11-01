@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory;
 @Environment(EnvType.CLIENT)
 public final class ModuleRegistry {
    private static final Logger LOGGER = LoggerFactory.getLogger("Anubis");
-   private static final List<ModuleProvider> PROVIDERS = new ArrayList<>(List.of(new BuiltinModuleProvider()));
+   private static final List<ModuleProvider> PROVIDERS = List.of(new BuiltinModuleProvider());
    private static final List<ClientModule> STAGED = new ArrayList<>();
    private static final Comparator<ClientModule> ALPHABETICAL = Comparator.comparing(ClientModule::name, String.CASE_INSENSITIVE_ORDER);
    private static volatile ModuleList modules;
@@ -30,14 +30,6 @@ public final class ModuleRegistry {
    private static int revision;
 
    private ModuleRegistry() {
-   }
-
-   public static synchronized void registerProvider(ModuleProvider provider) {
-      if (modules != null) {
-         throw new IllegalStateException("ModuleRegistry is frozen — providers must register during client init, before the first read");
-      }
-
-      PROVIDERS.add(provider);
    }
 
    public static List<ClientModule> all() {

@@ -23,6 +23,10 @@ public final class CombatMacroLock {
       return true;
    }
 
+   public static void take(Object owner) {
+      holder = owner;
+   }
+
    public static void release(Object owner) {
       if (holder == owner) {
          holder = null;

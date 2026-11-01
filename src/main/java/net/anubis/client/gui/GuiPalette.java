@@ -20,7 +20,7 @@ public final class GuiPalette {
 
    public static void refresh() {
       ThemeStore theme = ThemeStore.get();
-      accent = abgr(theme.accent.argbWithAlpha(255));
+      accent = abgr(ThemeTint.accent(theme.accent.argbWithAlpha(255)));
       accentHover = AnubisTheme.lerpColor(accent, -1, 0.2F);
       panelBg = fill(theme.panels);
       cardBg = fill(theme.cards);
@@ -50,7 +50,7 @@ public final class GuiPalette {
    }
 
    public static int fill(Surface surface) {
-      return abgr(surface.color.argbWithAlpha(Math.round(surface.opacity.get() * 255.0F)));
+      return abgr(ThemeTint.surface(surface.color.argbWithAlpha(Math.round(surface.opacity.get() * 255.0F))));
    }
 
    public static float rounding() {

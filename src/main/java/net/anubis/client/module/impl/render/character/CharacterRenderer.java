@@ -5,22 +5,21 @@ import net.anubis.client.module.impl.render.character.kit.CharacterModel;
 import net.anubis.client.module.impl.render.character.kit.Lights;
 import net.anubis.client.module.impl.render.character.kit.PartMesh;
 import net.anubis.client.module.impl.render.character.kit.Surface;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
+import net.minecraft.client.model.ModelPart;
+import net.minecraft.client.model.ModelTransform;
+import net.minecraft.client.render.OverlayTexture;
+import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.command.OrderedRenderCommandQueue;
+import net.minecraft.client.render.entity.LivingEntityRenderer;
+import net.minecraft.client.render.entity.model.PlayerEntityModel;
+import net.minecraft.client.render.entity.model.BipedEntityModel.ArmPose;
+import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.util.math.MatrixStack.Entry;
 import net.minecraft.util.Arm;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.OverlayTexture;
-import net.minecraft.client.model.ModelTransform;
-import net.minecraft.client.render.entity.model.PlayerEntityModel;
-import net.minecraft.client.model.ModelPart;
-import net.minecraft.client.render.entity.LivingEntityRenderer;
-import net.minecraft.client.util.math.MatrixStack.Entry;
-import net.minecraft.client.render.entity.model.BipedEntityModel.ArmPose;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
@@ -39,7 +38,9 @@ final class CharacterRenderer {
    private CharacterRenderer() {
    }
 
-   static void submit(WornCharacter worn, PlayerEntityModel pm, MatrixStack stack, OrderedRenderCommandQueue collector, int light, PlayerEntityRenderState state) {
+   static void submit(
+      WornCharacter worn, PlayerEntityModel pm, MatrixStack stack, OrderedRenderCommandQueue collector, int light, PlayerEntityRenderState state
+   ) {
       CharacterModel model = worn.model;
       PartMesh[] parts = model.parts;
       boolean ghost = state.invisible;
@@ -264,7 +265,9 @@ final class CharacterRenderer {
       }
    }
 
-   private static void chain(MatrixStack stack, PlayerEntityModel pm, CharacterModel model, int index, float[] angles, boolean rotate, ModelPart hand, float[] pitch) {
+   private static void chain(
+      MatrixStack stack, PlayerEntityModel pm, CharacterModel model, int index, float[] angles, boolean rotate, ModelPart hand, float[] pitch
+   ) {
       PartMesh part = model.parts[index];
       float s = model.scale;
       if (!part.extra) {
@@ -373,9 +376,8 @@ final class CharacterRenderer {
       float[] weight = bends ? s.weight : null;
       float[] flat = s.flat;
       Lights lights = flat != null ? CharacterLighting.current() : null;
-      boolean reuseRotations = MobilePerformance.active();
       if (weight != null) {
-         LEVELS.update(pitch, yaw, roll, reuseRotations);
+         LEVELS.update(pitch, yaw, roll);
       }
 
       float[] joint = bent == 0.0F && turn == 0.0F ? null : s.joint;
@@ -383,7 +385,7 @@ final class CharacterRenderer {
       float jy = part.jointY;
       float jz = part.jointZ;
       if (joint != null) {
-         JOINT_LEVELS.update(bent, turn, 0.0F, reuseRotations);
+         JOINT_LEVELS.update(bent, turn, 0.0F);
       }
 
       for (int v = 0; v < n; v++) {

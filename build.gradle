@@ -11,6 +11,10 @@ base {
 
 repositories {
 	mavenCentral()
+	exclusiveContent {
+		forRepository { maven { url = 'https://api.modrinth.com/maven' } }
+		filter { includeGroup 'maven.modrinth' }
+	}
 }
 
 loom {
@@ -48,9 +52,17 @@ dependencies {
 	// the bundled modules above.
 	modImplementation('net.fabricmc.fabric-api:fabric-transitive-access-wideners-v1:7.1.0+014c8cec3e') { transitive = false }
 
+	// Anubis 1.0 declares "fabric-api" as a dependency; only needed to run the dev client.
+	modLocalRuntime('net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11')
+
 	// Compile-only for the optional Indigo mixin (anubis.indigo.mixins.json, "required": false).
 	modCompileOnly('net.fabricmc.fabric-api:fabric-renderer-indigo:5.0.3+f4ffd2e53e') { transitive = false }
 	modCompileOnly('net.fabricmc.fabric-api:fabric-renderer-api-v1:8.0.3+f4ffd2e53e') { transitive = false }
+
+	// Compile-only for Easy Place's optional Litematica integration ("suggests": litematica).
+	// Newest 1.21.11 builds made with Loom 1.16.3; later ones need Loom 1.17.
+	modCompileOnly('maven.modrinth:litematica:0.26.14') { transitive = false }
+	modCompileOnly('maven.modrinth:malilib:0.27.19') { transitive = false }
 
 	// Dear ImGui bindings. LWJGL itself is provided by Minecraft.
 	[
@@ -64,11 +76,6 @@ dependencies {
 		include "io.github.spair:${it}:${project.imgui_version}"
 	}
 
-	// SOCKS/HTTP proxy support. Netty core is provided by Minecraft.
-	['netty-codec-socks', 'netty-handler-proxy'].each {
-		implementation("io.netty:${it}:${project.netty_version}") { transitive = false }
-		include "io.netty:${it}:${project.netty_version}"
-	}
 }
 
 processResources {

@@ -97,10 +97,6 @@ public abstract class Shape2D {
       return new Shape2D.Polygon(xy);
    }
 
-   public static Shape2D heart(float cx, float cy, float size) {
-      return new Shape2D.Heart(cx, cy, size);
-   }
-
    public static Shape2D field(Shape2D.Field field, float minX, float minY, float maxX, float maxY) {
       return new Shape2D.Custom(field, minX, minY, maxX, maxY);
    }

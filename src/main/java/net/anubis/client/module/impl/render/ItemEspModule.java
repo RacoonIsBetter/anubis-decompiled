@@ -7,15 +7,14 @@ import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ItemColorListSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.TracerEngine;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.Item;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
 
 @Environment(EnvType.CLIENT)
 public final class ItemEspModule extends ClientModule {
@@ -64,28 +63,10 @@ public final class ItemEspModule extends ClientModule {
       if (this.sTracers.get() && this.sItemColors.hasAnyEnabled()) {
          MinecraftClient mc = MinecraftClient.getInstance();
          if (mc.world != null) {
-            if (!MobilePerformance.active()) {
-               for (Entity entity : mc.world.getEntities()) {
-                  if (entity instanceof ItemEntity item && this.wants(item, event.partialTick)) {
-                     Vec3d pos = item.getLerpedPos(event.partialTick);
-                     TracerEngine.draw(pos, this.sItemColors.colorArgb(item.getStack().getItem()));
-                  }
-               }
-            } else {
-               Vec3d eye = mc.player == null ? null : mc.player.getCameraPosVec(event.partialTick);
-               float range = Math.max(1.0F, this.sRange.get());
-               double rangeSq = (double)range * range;
-
-               for (Entity entity : mc.world.getEntities()) {
-                  if (entity instanceof ItemEntity item && !item.isRemoved()) {
-                     Item kind = item.getStack().getItem();
-                     if (this.sItemColors.isEnabled(kind)) {
-                        Vec3d pos = item.getLerpedPos(event.partialTick);
-                        if (eye == null || pos.squaredDistanceTo(eye) <= rangeSq) {
-                           TracerEngine.draw(pos, this.sItemColors.colorArgb(kind));
-                        }
-                     }
-                  }
+            for (Entity entity : mc.world.getEntities()) {
+               if (entity instanceof ItemEntity item && this.wants(item, event.partialTick)) {
+                  Vec3d pos = item.getLerpedPos(event.partialTick);
+                  TracerEngine.draw(pos, this.sItemColors.colorArgb(item.getStack().getItem()));
                }
             }
          }

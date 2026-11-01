@@ -6,9 +6,9 @@ import java.util.function.Predicate;
 import net.anubis.client.chat.ModuleChat;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.screen.slot.SlotActionType;
 
 @Environment(EnvType.CLIENT)
 final class OrderRestock {
@@ -190,6 +190,18 @@ final class OrderRestock {
          }
 
          price = (long)Math.floor(top) + this.product.bidIncrement();
+         long sell = this.bot.sellPrice();
+         if (sell > 0L && price >= sell) {
+            this.say(
+               ModuleChat.body()
+                  .warn("Top order is $" + ServerText.shortMoney(top))
+                  .text(", not below your AH price $")
+                  .value(ServerText.shortMoney(sell))
+                  .text(", so no order this time.")
+            );
+            return -1L;
+         }
+
          this.say(
             ModuleChat.body()
                .text("Top order is $")
@@ -327,15 +339,13 @@ final class OrderRestock {
    }
 
    private Dialogs.Button closestLoose(Dialogs.View view) {
-      Dialogs.Button best = null;
-
       for (Dialogs.Button button : view.buttons()) {
-         if (this.product.nameMatches(button.label(), true) && (best == null || button.key().length() < best.key().length())) {
-            best = button;
+         if (this.product.nameMatches(button.key().replaceFirst("^[0-9]+x?", ""), false)) {
+            return button;
          }
       }
 
-      return best;
+      return null;
    }
 
    private void checkItem(Dialogs.View view) {

@@ -7,7 +7,6 @@ import imgui.type.ImString;
 import java.util.List;
 import java.util.Locale;
 import net.anubis.client.imgui.ImGuiManager;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 
@@ -76,8 +75,8 @@ public final class AnubisWidgets {
       dl.addRectFilled(x, y, x + w, y + h, c(AnubisTheme.lerpColor(-11911366, GuiPalette.accent(), t)), r);
       float knobR = r - s(2.5F);
       float cx = x + r + (w - 2.0F * r) * t;
-      dl.addCircleFilled(cx, y + r + s(1.0F), knobR, c(855638016), MobilePerformance.uiSegments(24, knobR));
-      dl.addCircleFilled(cx, y + r, knobR, c(-461067), MobilePerformance.uiSegments(24, knobR));
+      dl.addCircleFilled(cx, y + r + s(1.0F), knobR, c(855638016), 24);
+      dl.addCircleFilled(cx, y + r, knobR, c(-461067), 24);
    }
 
    public static boolean sliderFloat(String id, float[] value, float min, float max, float width) {
@@ -120,11 +119,11 @@ public final class AnubisWidgets {
       }
 
       if (focus > 0.01F) {
-         dl.addCircleFilled(fillX, cy, knobR + s(4.0F), c(withAlpha(GuiPalette.accent(), 0.25F * focus)), MobilePerformance.uiSegments(24, knobR + s(4.0F)));
+         dl.addCircleFilled(fillX, cy, knobR + s(4.0F), c(withAlpha(GuiPalette.accent(), 0.25F * focus)), 24);
       }
 
-      dl.addCircleFilled(fillX, cy + s(1.0F), knobR, c(1073741824), MobilePerformance.uiSegments(24, knobR));
-      dl.addCircleFilled(fillX, cy, knobR, c(-461067), MobilePerformance.uiSegments(24, knobR));
+      dl.addCircleFilled(fillX, cy + s(1.0F), knobR, c(1073741824), 24);
+      dl.addCircleFilled(fillX, cy, knobR, c(-461067), 24);
       return changed;
    }
 
@@ -155,14 +154,7 @@ public final class AnubisWidgets {
       float sy = ImGui.getCursorScreenPosY();
       boolean clicked = ImGui.invisibleButton(id, size, size);
       float hover = animate(ImGui.getItemID(), ImGui.isItemHovered(), 18.0F);
-      ImGui.getWindowDrawList()
-         .addCircleFilled(
-            sx + size * 0.5F,
-            sy + size * 0.5F,
-            size * 0.5F,
-            c(AnubisTheme.lerpColor(-13226454, -12240588, hover)),
-            MobilePerformance.uiSegments(32, size * 0.5F)
-         );
+      ImGui.getWindowDrawList().addCircleFilled(sx + size * 0.5F, sy + size * 0.5F, size * 0.5F, c(AnubisTheme.lerpColor(-13226454, -12240588, hover)), 32);
       return clicked;
    }
 
@@ -362,13 +354,13 @@ public final class AnubisWidgets {
 
    public static void magnifier(ImDrawList dl, float cx, float cy, float r, int color) {
       float cr = r * 0.62F;
-      dl.addCircle(cx - r * 0.15F, cy - r * 0.15F, cr, c(color), MobilePerformance.uiSegments(20, cr), s(1.6F));
+      dl.addCircle(cx - r * 0.15F, cy - r * 0.15F, cr, c(color), 20, s(1.6F));
       dl.addLine(cx + r * 0.3F, cy + r * 0.3F, cx + r, cy + r, c(color), s(1.8F));
    }
 
    public static void crosshair(ImDrawList dl, float cx, float cy, float r, int color) {
       float t = s(1.5F);
-      dl.addCircle(cx, cy, r * 0.62F, c(color), MobilePerformance.uiSegments(20, r * 0.62F), t);
+      dl.addCircle(cx, cy, r * 0.62F, c(color), 20, t);
       dl.addLine(cx, cy - r, cx, cy - r * 0.35F, c(color), t);
       dl.addLine(cx, cy + r * 0.35F, cx, cy + r, c(color), t);
       dl.addLine(cx - r, cy, cx - r * 0.35F, cy, c(color), t);
@@ -398,14 +390,14 @@ public final class AnubisWidgets {
    }
 
    public static void ring(ImDrawList dl, float cx, float cy, float r, int color) {
-      dl.addCircle(cx, cy, r * 0.62F, c(color), MobilePerformance.uiSegments(24, r * 0.62F), r * 0.42F);
+      dl.addCircle(cx, cy, r * 0.62F, c(color), 24, r * 0.42F);
    }
 
    public static void eye(ImDrawList dl, float cx, float cy, float r, int color) {
       float t = s(1.5F);
       dl.addBezierQuadratic(cx - r, cy, cx, cy - r * 1.15F, cx + r, cy, c(color), t, 16);
       dl.addBezierQuadratic(cx - r, cy, cx, cy + r * 1.15F, cx + r, cy, c(color), t, 16);
-      dl.addCircleFilled(cx, cy, r * 0.3F, c(color), MobilePerformance.uiSegments(16, r * 0.3F));
+      dl.addCircleFilled(cx, cy, r * 0.3F, c(color), 16);
    }
 
    public static void monitor(ImDrawList dl, float cx, float cy, float r, int color) {

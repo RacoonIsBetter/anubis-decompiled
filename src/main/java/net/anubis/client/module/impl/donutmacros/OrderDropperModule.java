@@ -7,11 +7,11 @@ import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.setting.NumberSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.screen.slot.SlotActionType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,13 +94,14 @@ public final class OrderDropperModule extends ClientModule {
    }
 
    private void drop(Gui gui, int slot, int wanted, long delayMs) {
-      String orderName = this.openCollect(gui, slot);
+      ItemStack[] first = new ItemStack[]{ItemStack.EMPTY};
+      String orderName = this.openCollect(gui, slot, first);
       int dropped = 0;
       int items = 0;
 
       for (int page = 0; page < wanted; page++) {
          if (!this.worker.call(Gui::containerOpenNow)) {
-            orderName = this.openCollect(gui, slot);
+            orderName = this.openCollect(gui, slot, first);
          }
 
          int[] state = this.worker.call(OrderDropperModule::pageState);
@@ -145,7 +146,7 @@ public final class OrderDropperModule extends ClientModule {
       );
    }
 
-   private String openCollect(Gui gui, int slot) {
+   private String openCollect(Gui gui, int slot, ItemStack[] first) {
       if (!OrdersNav.openYourOrders(this.worker, gui, this::say)) {
          throw new AuctionHouse.Problem("Could not open Your Orders");
       }
@@ -156,6 +157,13 @@ public final class OrderDropperModule extends ClientModule {
       }
 
       String name = order.getName().getString();
+      if (first[0].isEmpty()) {
+         first[0] = order.copy();
+      } else if (!order.isOf(first[0].getItem()) || !name.equals(first[0].getName().getString())) {
+         gui.closeAll();
+         throw new AuctionHouse.Problem("Slot " + slot + " now holds a different order (" + name + "), stopped so nothing else is dropped");
+      }
+
       String before = gui.fingerprint();
       gui.click(slot, 0, SlotActionType.PICKUP);
       if (!this.worker.waitFor(() -> Gui.containerOpenNow() && !OrdersNav.isYourOrdersNow() && !Gui.fingerprintNow().equals(before), 5000L)) {

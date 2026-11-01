@@ -1,6 +1,5 @@
 package net.anubis.client.gui;
 
-import imgui.AnubisAndroidNative;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
@@ -346,9 +345,7 @@ public final class ThemeImages {
    }
 
    public void browseAsync() {
-      if (AnubisAndroidNative.isAndroidRuntime()) {
-         AndroidSystemPicker.open();
-      } else if (!this.dialogOpen) {
+      if (!this.dialogOpen) {
          this.dialogOpen = true;
          Thread thread = new Thread(() -> {
             try {
@@ -388,10 +385,6 @@ public final class ThemeImages {
    }
 
    public Path takePendingImport() {
-      if (AnubisAndroidNative.isAndroidRuntime()) {
-         return AndroidSystemPicker.takeSelection();
-      }
-
       Path path = this.pendingImport;
       this.pendingImport = null;
       return path;

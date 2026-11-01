@@ -5,6 +5,7 @@ import net.anubis.client.config.HudTheme;
 import net.anubis.client.config.ModuleConfigStore;
 import net.anubis.client.config.ProfileAutoLoad;
 import net.anubis.client.config.ThemeStore;
+import net.anubis.client.donutbets.DonutBetsFeed;
 import net.anubis.client.esp.ChunkScanner;
 import net.anubis.client.event.impl.PacketAppliedEvent;
 import net.anubis.client.event.impl.PacketReceiveNettyEvent;
@@ -17,12 +18,15 @@ import net.anubis.client.gui.ImGuiScreen;
 import net.anubis.client.gui.LoadingScreens;
 import net.anubis.client.gui.StaffGhost;
 import net.anubis.client.gui.ToggleToasts;
+import net.anubis.client.gui.mainmenu.OfficialBuildBanner;
 import net.anubis.client.imgui.ImGuiManager;
 import net.anubis.client.input.AnubisKeyPolling;
 import net.anubis.client.input.ModuleKeybinds;
 import net.anubis.client.module.ModuleRegistry;
 import net.anubis.client.module.impl.misc.noinvleak.StreamOverlay;
+import net.anubis.client.security.OfficialBuild;
 import net.anubis.client.util.BlockEntityLeakTracker;
+import net.anubis.client.util.CompletionChannel;
 import net.anubis.client.util.combat.CombatTarget;
 import net.anubis.client.util.netherite.NetheriteChunkTracker;
 import net.anubis.client.util.playerbypass.PlayerBypassLightTracker;
@@ -35,13 +39,13 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.ClientStopping;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.EndTick;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.util.Identifier;
-import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.sound.SoundEvent;
+import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.option.KeyBinding.Category;
 import net.minecraft.client.util.InputUtil.Type;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +73,8 @@ public final class AnubisClientMod implements ClientModInitializer {
       Render2DEvent.TYPE.listen(StaffGhost.class, StaffGhost::renderNote);
       ChunkScanner.init();
       PacketReceiveNettyEvent.TYPE.listen(LEAK_TRACKER_OWNER, event -> BlockEntityLeakTracker.ingest(event.packet));
+      CompletionChannel.install();
+      DonutBetsFeed.start();
       PacketAppliedEvent.TYPE.listen(PLAYER_BYPASS_TRACKER_OWNER, event -> PlayerBypassLightTracker.onPacketApplied(event.packet));
       TickEvent.TYPE.listen(PLAYER_BYPASS_TRACKER_OWNER, event -> PlayerBypassLightTracker.onTick());
       TickEvent.TYPE.listen(BorderlessFullscreen.class, event -> BorderlessFullscreen.tick());
@@ -78,7 +84,7 @@ public final class AnubisClientMod implements ClientModInitializer {
       ProfileAutoLoad.install();
       ClientLifecycleEvents.CLIENT_STOPPING.register((ClientStopping)client -> {
          HudLayoutStore.getInstance().save();
-         ModuleConfigStore.getInstance().save();
+         ModuleConfigStore.getInstance().saveAndWait();
          ThemeStore.get().save();
          HudTheme.get().save();
          ProtectedChunkStore.get().flushAndWait();
@@ -86,6 +92,9 @@ public final class AnubisClientMod implements ClientModInitializer {
       });
       openGuiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.anubis.open_gui", Type.KEYSYM, 344, KEY_CATEGORY));
       ModuleConfigStore.getInstance().load();
+      OfficialBuild.enforceIfPending();
+      OfficialBuildBanner.installVanillaTitleScreen();
+      ClientTickEvents.END_CLIENT_TICK.register((EndTick)client -> OfficialBuild.enforceOnFirstTick());
       AddonManager.configLoaded();
       ClientTickEvents.END_CLIENT_TICK
          .register(
@@ -101,7 +110,9 @@ public final class AnubisClientMod implements ClientModInitializer {
                }
 
                this.keybinds
-                  .update(ModuleRegistry.all(), AnubisClientMod::isBoundKeyDown, client.currentScreen == null && client.isWindowFocused() && client.player != null);
+                  .update(
+                     ModuleRegistry.all(), AnubisClientMod::isBoundKeyDown, client.currentScreen == null && client.isWindowFocused() && client.player != null
+                  );
                ModuleConfigStore.getInstance().tickAutosave();
             }
          );
@@ -132,8 +143,6 @@ public final class AnubisClientMod implements ClientModInitializer {
 
    private static boolean isBoundKeyDown(int key) {
       MinecraftClient client = MinecraftClient.getInstance();
-      return key >= 1000
-         ? GLFW.glfwGetMouseButton(client.getWindow().getHandle(), key - 1000) == 1
-         : AnubisKeyPolling.isKeyDown(client.getWindow(), key);
+      return key >= 1000 ? GLFW.glfwGetMouseButton(client.getWindow().getHandle(), key - 1000) == 1 : AnubisKeyPolling.isKeyDown(client.getWindow(), key);
    }
 }

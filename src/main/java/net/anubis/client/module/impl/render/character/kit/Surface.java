@@ -40,10 +40,6 @@ public final class Surface {
       return this.glow != null;
    }
 
-   public boolean flatLit() {
-      return this.flat != null;
-   }
-
    @Environment(EnvType.CLIENT)
    static final class Builder {
       float[] pos = new float[768];

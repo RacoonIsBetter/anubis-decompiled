@@ -6,40 +6,40 @@ import java.util.ArrayList;
 import java.util.List;
 import net.anubis.client.event.EventHandler;
 import net.anubis.client.event.impl.Render3DEvent;
+import net.anubis.client.gui.ThemeTint;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.world.debug.gizmo.VisibilityConfigurable;
-import net.minecraft.client.render.DrawStyle;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
-import net.minecraft.entity.Entity;
 import net.minecraft.block.BedBlock;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.shape.VoxelShapes;
-import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.block.BlockState;
-import net.minecraft.state.property.Properties;
+import net.minecraft.block.ChestBlock;
+import net.minecraft.block.ShapeContext;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.block.enums.DoubleBlockHalf;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.block.ShapeContext;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
+import net.minecraft.client.render.DrawStyle;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.util.math.ColorHelper;
-import net.minecraft.util.math.Direction.Axis;
+import net.minecraft.entity.Entity;
+import net.minecraft.state.property.Properties;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult.Type;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.ColorHelper;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.Direction.Axis;
+import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.util.shape.VoxelShapes;
+import net.minecraft.world.debug.gizmo.GizmoDrawing;
+import net.minecraft.world.debug.gizmo.VisibilityConfigurable;
 
 @Environment(EnvType.CLIENT)
 public final class BlockOverlayModule extends ClientModule {
@@ -78,10 +78,6 @@ public final class BlockOverlayModule extends ClientModule {
    private BlockPos partner;
    private BlockState partnerState;
    private final List<double[]> edges = new ArrayList<>();
-   private final OverlaySegments mobileSegments = new OverlaySegments();
-   private List<double[]> mobileFaceEdges = List.of();
-   private Box mobileFaceBox;
-   private Direction mobileFace;
    private List<Box> boxes = List.of();
    private Box localBounds;
    private Box goal;
@@ -202,8 +198,6 @@ public final class BlockOverlayModule extends ClientModule {
          this.partner = second;
          this.partnerState = secondState;
          this.edges.clear();
-         this.mobileSegments.invalidate();
-         this.mobileFaceBox = null;
          shape.forEachEdge((x0, y0, z0, x1, y1, z1) -> this.edges.add(new double[]{x0, y0, z0, x1, y1, z1}));
          this.boxes = shape.getBoundingBoxes();
          this.localBounds = shape.getBoundingBox();
@@ -239,7 +233,6 @@ public final class BlockOverlayModule extends ClientModule {
             case DOWN -> Math.abs(local.y - b.minY) < e;
             case SOUTH -> Math.abs(local.z - b.maxZ) < e;
             case NORTH -> Math.abs(local.z - b.minZ) < e;
-            default -> throw new MatchException(null, null);
          };
          if (onPlane && b.expand(e).contains(local)) {
             return b;
@@ -270,10 +263,6 @@ public final class BlockOverlayModule extends ClientModule {
       this.partner = null;
       this.partnerState = null;
       this.edges.clear();
-      this.mobileSegments.clear();
-      this.mobileFaceEdges = List.of();
-      this.mobileFaceBox = null;
-      this.mobileFace = null;
       this.boxes = List.of();
       this.localBounds = null;
       this.goal = null;
@@ -288,15 +277,9 @@ public final class BlockOverlayModule extends ClientModule {
    private void draw() {
       this.fade = this.presence * this.presence * (3.0F - 2.0F * this.presence);
       double pop = 0.94 + 0.06 * this.fade;
-      double[] x = axis(
-         this.box.minX, this.box.maxX, this.goal.minX, this.goal.maxX, this.pos.getX() - this.goal.minX, pop
-      );
-      double[] y = axis(
-         this.box.minY, this.box.maxY, this.goal.minY, this.goal.maxY, this.pos.getY() - this.goal.minY, pop
-      );
-      double[] z = axis(
-         this.box.minZ, this.box.maxZ, this.goal.minZ, this.goal.maxZ, this.pos.getZ() - this.goal.minZ, pop
-      );
+      double[] x = axis(this.box.minX, this.box.maxX, this.goal.minX, this.goal.maxX, this.pos.getX() - this.goal.minX, pop);
+      double[] y = axis(this.box.minY, this.box.maxY, this.goal.minY, this.goal.maxY, this.pos.getY() - this.goal.minY, pop);
+      double[] z = axis(this.box.minZ, this.box.maxZ, this.goal.minZ, this.goal.maxZ, this.pos.getZ() - this.goal.minZ, pop);
       this.ax = x[0];
       this.bx = x[1];
       this.ay = y[0];
@@ -323,17 +306,7 @@ public final class BlockOverlayModule extends ClientModule {
       if (lines) {
          List<double[]> outlineEdges = this.edges;
          if (this.faceOnly.get()) {
-            if (!MobilePerformance.active()) {
-               outlineEdges = faceEdges(this.faceBox, this.face);
-            } else {
-               if (this.faceBox != this.mobileFaceBox || this.face != this.mobileFace) {
-                  this.mobileFaceEdges = faceEdges(this.faceBox, this.face);
-                  this.mobileFaceBox = this.faceBox;
-                  this.mobileFace = this.face;
-               }
-
-               outlineEdges = this.mobileFaceEdges;
-            }
+            outlineEdges = faceEdges(this.faceBox, this.face);
          }
 
          this.outline(outlineEdges);
@@ -353,111 +326,44 @@ public final class BlockOverlayModule extends ClientModule {
    }
 
    private void outline(List<double[]> list) {
-      if (MobilePerformance.active()) {
-         this.outlineMobile(list);
-      } else {
-         boolean varies = !this.colorMode.is("Solid");
-         List<double[]> pieces = new ArrayList<>(list.size() * 4);
-         List<Integer> colors = new ArrayList<>(list.size() * 4);
+      boolean varies = !this.colorMode.is("Solid");
+      List<double[]> pieces = new ArrayList<>(list.size() * 4);
+      List<Integer> colors = new ArrayList<>(list.size() * 4);
 
-         for (double[] e : list) {
-            double length = Math.sqrt(sq(e[3] - e[0]) + sq(e[4] - e[1]) + sq(e[5] - e[2]));
-            int n = varies ? MathHelper.clamp((int)Math.ceil(length / 0.125), 1, 16) : 1;
+      for (double[] e : list) {
+         double length = Math.sqrt(sq(e[3] - e[0]) + sq(e[4] - e[1]) + sq(e[5] - e[2]));
+         int n = varies ? MathHelper.clamp((int)Math.ceil(length / 0.125), 1, 16) : 1;
 
-            for (int i = 0; i < n; i++) {
-               double t0 = (double)i / n;
-               double t1 = (double)(i + 1) / n;
-               double tm = (t0 + t1) * 0.5;
-               pieces.add(
-                  new double[]{
-                     MathHelper.lerp(t0, e[0], e[3]),
-                     MathHelper.lerp(t0, e[1], e[4]),
-                     MathHelper.lerp(t0, e[2], e[5]),
-                     MathHelper.lerp(t1, e[0], e[3]),
-                     MathHelper.lerp(t1, e[1], e[4]),
-                     MathHelper.lerp(t1, e[2], e[5])
-                  }
-               );
-               colors.add(
-                  this.colorAt(MathHelper.lerp(tm, e[0], e[3]), MathHelper.lerp(tm, e[1], e[4]), MathHelper.lerp(tm, e[2], e[5]))
-               );
-            }
+         for (int i = 0; i < n; i++) {
+            double t0 = (double)i / n;
+            double t1 = (double)(i + 1) / n;
+            double tm = (t0 + t1) * 0.5;
+            pieces.add(
+               new double[]{
+                  MathHelper.lerp(t0, e[0], e[3]),
+                  MathHelper.lerp(t0, e[1], e[4]),
+                  MathHelper.lerp(t0, e[2], e[5]),
+                  MathHelper.lerp(t1, e[0], e[3]),
+                  MathHelper.lerp(t1, e[1], e[4]),
+                  MathHelper.lerp(t1, e[2], e[5])
+               }
+            );
+            colors.add(this.colorAt(MathHelper.lerp(tm, e[0], e[3]), MathHelper.lerp(tm, e[1], e[4]), MathHelper.lerp(tm, e[2], e[5])));
          }
-
-         float w = this.width.get();
-         if (this.glow.get()) {
-            for (int i = 0; i < pieces.size(); i++) {
-               double[] p = pieces.get(i);
-               int c = colors.get(i);
-               this.line(p, ColorHelper.scaleAlpha(c, 0.34F * this.fade), w + 3.0F, 0.002);
-               this.line(p, ColorHelper.scaleAlpha(c, 0.13F * this.fade), w + 8.0F, 0.002);
-            }
-         }
-
-         for (int i = 0; i < pieces.size(); i++) {
-            this.line(pieces.get(i), ColorHelper.scaleAlpha(colors.get(i), this.fade), w, 0.004);
-         }
-      }
-   }
-
-   private void outlineMobile(List<double[]> list) {
-      this.mobileSegments.update(list, !this.colorMode.is("Solid"));
-      double[] points = this.mobileSegments.points();
-      int[] colors = this.mobileSegments.colors();
-      int count = this.mobileSegments.count();
-      int i = 0;
-
-      for (int p = 0; i < count; p += 9) {
-         colors[i] = this.colorAt(points[p + 6], points[p + 7], points[p + 8]);
-         i++;
       }
 
       float w = this.width.get();
       if (this.glow.get()) {
-         int ix = 0;
-
-         for (int p = 0; ix < count; p += 9) {
-            Vec3d from = this.lifted(points[p], points[p + 1], points[p + 2], 0.002);
-            Vec3d to = this.lifted(points[p + 3], points[p + 4], points[p + 5], 0.002);
-            this.drawLine(from, to, ColorHelper.scaleAlpha(colors[ix], 0.34F * this.fade), w + 3.0F);
-            this.drawLine(from, to, ColorHelper.scaleAlpha(colors[ix], 0.13F * this.fade), w + 8.0F);
-            ix++;
+         for (int i = 0; i < pieces.size(); i++) {
+            double[] p = pieces.get(i);
+            int c = colors.get(i);
+            this.line(p, ColorHelper.scaleAlpha(c, 0.34F * this.fade), w + 3.0F, 0.002);
+            this.line(p, ColorHelper.scaleAlpha(c, 0.13F * this.fade), w + 8.0F, 0.002);
          }
       }
 
-      int ix = 0;
-
-      for (int p = 0; ix < count; p += 9) {
-         this.drawLine(
-            this.lifted(points[p], points[p + 1], points[p + 2], 0.004),
-            this.lifted(points[p + 3], points[p + 4], points[p + 5], 0.004),
-            ColorHelper.scaleAlpha(colors[ix], this.fade),
-            w
-         );
-         ix++;
-      }
-   }
-
-   private Vec3d lifted(double lx, double ly, double lz, double amount) {
-      double x = this.ax + this.bx * lx;
-      double y = this.ay + this.by * ly;
-      double z = this.az + this.bz * lz;
-      double dx = this.eye.x - x;
-      double dy = this.eye.y - y;
-      double dz = this.eye.z - z;
-      double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (length < 1.0E-6) {
-         return new Vec3d(x, y, z);
-      }
-
-      double scale = amount / length;
-      return new Vec3d(x + dx * scale, y + dy * scale, z + dz * scale);
-   }
-
-   private void drawLine(Vec3d from, Vec3d to, int argb, float width) {
-      VisibilityConfigurable drawn = GizmoDrawing.line(from, to, argb, width);
-      if (this.seeThrough.get()) {
-         drawn.ignoreOcclusion();
+      for (int i = 0; i < pieces.size(); i++) {
+         this.line(pieces.get(i), ColorHelper.scaleAlpha(colors.get(i), this.fade), w, 0.004);
       }
    }
 
@@ -513,7 +419,7 @@ public final class BlockOverlayModule extends ClientModule {
 
    private int colorAt(double lx, double ly, double lz) {
       boolean themed = this.colorMode.is("Theme");
-      int base = themed ? CosmeticAccent.argb() : this.color.argb();
+      int base = themed ? CosmeticAccent.argb() : ThemeTint.world(this.color.argb());
       if (this.colorMode.is("Solid")) {
          return base;
       } else {
@@ -526,10 +432,10 @@ public final class BlockOverlayModule extends ClientModule {
          double shift = this.flow.get() ? this.time * 0.35F : 0.0;
          if (this.colorMode.is("Rainbow")) {
             double hue = u * 0.5 - shift;
-            return base & 0xFF000000 | MathHelper.hsvToRgb((float)(hue - Math.floor(hue)), 0.65F, 1.0F) & 16777215;
+            return ThemeTint.world(base & 0xFF000000 | MathHelper.hsvToRgb((float)(hue - Math.floor(hue)), 0.65F, 1.0F) & 16777215);
          } else {
             double k = this.flow.get() ? 0.5 - 0.5 * Math.cos((Math.PI * 2) * (u - shift)) : u;
-            int second = themed ? ColorHelper.lerp(0.55F, base, -1) : this.secondColor.argb();
+            int second = themed ? ColorHelper.lerp(0.55F, base, -1) : ThemeTint.world(this.secondColor.argb());
             return ColorHelper.lerp((float)k, base, second);
          }
       }
@@ -549,7 +455,6 @@ public final class BlockOverlayModule extends ClientModule {
          case DOWN -> new Vec3d(c.x, b.minY, c.z);
          case SOUTH -> new Vec3d(c.x, c.y, b.maxZ);
          case NORTH -> new Vec3d(c.x, c.y, b.minZ);
-         default -> throw new MatchException(null, null);
       };
    }
 
@@ -557,23 +462,16 @@ public final class BlockOverlayModule extends ClientModule {
       double[][] c = switch (d.getAxis()) {
          case X -> {
             double x = d == Direction.EAST ? b.maxX : b.minX;
-            yield new double[][]{
-               {x, b.minY, b.minZ}, {x, b.maxY, b.minZ}, {x, b.maxY, b.maxZ}, {x, b.minY, b.maxZ}
-            };
+            yield new double[][]{{x, b.minY, b.minZ}, {x, b.maxY, b.minZ}, {x, b.maxY, b.maxZ}, {x, b.minY, b.maxZ}};
          }
          case Y -> {
             double y = d == Direction.UP ? b.maxY : b.minY;
-            yield new double[][]{
-               {b.minX, y, b.minZ}, {b.maxX, y, b.minZ}, {b.maxX, y, b.maxZ}, {b.minX, y, b.maxZ}
-            };
+            yield new double[][]{{b.minX, y, b.minZ}, {b.maxX, y, b.minZ}, {b.maxX, y, b.maxZ}, {b.minX, y, b.maxZ}};
          }
          case Z -> {
             double z = d == Direction.SOUTH ? b.maxZ : b.minZ;
-            yield new double[][]{
-               {b.minX, b.minY, z}, {b.maxX, b.minY, z}, {b.maxX, b.maxY, z}, {b.minX, b.maxY, z}
-            };
+            yield new double[][]{{b.minX, b.minY, z}, {b.maxX, b.minY, z}, {b.maxX, b.maxY, z}, {b.minX, b.maxY, z}};
          }
-         default -> throw new MatchException(null, null);
       };
       List<double[]> edges = new ArrayList<>(4);
 

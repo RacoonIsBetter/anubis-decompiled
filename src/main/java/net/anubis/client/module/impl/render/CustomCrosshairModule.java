@@ -5,6 +5,7 @@ import imgui.ImGui;
 import net.anubis.client.gui.AnubisTheme;
 import net.anubis.client.gui.AnubisWidgets;
 import net.anubis.client.gui.GuiPalette;
+import net.anubis.client.gui.ThemeTint;
 import net.anubis.client.imgui.ImGuiManager;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.HudOverlayProvider;
@@ -15,21 +16,21 @@ import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.hud.debug.DebugHudEntries;
+import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.option.AttackIndicator;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.AttackRangeComponent;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.world.GameMode;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.screen.NamedScreenHandlerFactory;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.client.option.AttackIndicator;
-import net.minecraft.client.gui.screen.ChatScreen;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.component.DataComponentTypes;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.hit.HitResult.Type;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.GameMode;
 
 @Environment(EnvType.CLIENT)
 public final class CustomCrosshairModule extends ClientModule implements HudOverlayProvider {
@@ -124,7 +125,9 @@ public final class CustomCrosshairModule extends ClientModule implements HudOver
       } else if (!mc.options.getPerspective().isFirstPerson()) {
          return false;
       } else {
-         return mc.debugHudEntryList.isEntryVisible(DebugHudEntries.THREE_DIMENSIONAL_CROSSHAIR) ? false : mc.interactionManager.getCurrentGameMode() != GameMode.SPECTATOR || spectatorCanInteract(mc);
+         return mc.debugHudEntryList.isEntryVisible(DebugHudEntries.THREE_DIMENSIONAL_CROSSHAIR)
+            ? false
+            : mc.interactionManager.getCurrentGameMode() != GameMode.SPECTATOR || spectatorCanInteract(mc);
       }
    }
 
@@ -160,7 +163,7 @@ public final class CustomCrosshairModule extends ClientModule implements HudOver
    }
 
    private int currentColor() {
-      int base = this.colorMode.is("Accent") ? CosmeticAccent.argb() : this.color.argb();
+      int base = this.colorMode.is("Accent") ? CosmeticAccent.argb() : ThemeTint.world(this.color.argb());
       return this.tint <= 0.0F ? base : AnubisTheme.lerpColor(base, this.targetColor.argb(), this.tint);
    }
 
@@ -253,7 +256,9 @@ public final class CustomCrosshairModule extends ClientModule implements HudOver
       dl.addRectFilled(x0 - grow, y0 - grow, x1 + grow, y1 + grow, color);
    }
 
-   private void drawCooldown(ImDrawList dl, MinecraftClient mc, ClientPlayerEntity player, CustomCrosshairModule.Geometry g, int fill, float edge, float scale, float dt) {
+   private void drawCooldown(
+      ImDrawList dl, MinecraftClient mc, ClientPlayerEntity player, CustomCrosshairModule.Geometry g, int fill, float edge, float scale, float dt
+   ) {
       boolean wanted = mc.options.getAttackIndicator().getValue() == AttackIndicator.CROSSHAIR;
       float charge = player.getAttackCooldownProgress(0.0F);
       boolean ready = wanted && readyOnTarget(mc, player, charge);
@@ -286,7 +291,7 @@ public final class CustomCrosshairModule extends ClientModule implements HudOver
          return false;
       }
 
-      AttackRangeComponent range = (AttackRangeComponent)player.getActiveOrMainHandStack().get(DataComponentTypes.ATTACK_RANGE);
+      AttackRangeComponent range = player.getActiveOrMainHandStack().get(DataComponentTypes.ATTACK_RANGE);
       return range == null || mc.crosshairTarget == null || range.isWithinRange(player, mc.crosshairTarget.getPos());
    }
 

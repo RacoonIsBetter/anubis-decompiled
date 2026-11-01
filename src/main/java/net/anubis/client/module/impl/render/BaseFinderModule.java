@@ -28,7 +28,7 @@ import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.HudOverlayProvider;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.impl.client.PerformanceModule;
-import net.anubis.client.module.impl.misc.PlayerBypass2Module;
+import net.anubis.client.module.impl.misc.PlayerBypassModule;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
@@ -97,7 +97,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private static final int UNDERGROUND_DEPTH = 8;
    private static final int MAX_REPORTS = 8192;
    private static final long NOTIFY_COOLDOWN_MS = 1500L;
-   /** Chunk-signal score below which Player Bypass 2's sources are ignored (same as that module). */
+   /** Chunk-signal score below which Player Bypass's sources are ignored (same as that module). */
    private static final float HIDDEN_MIN_SOURCE = 0.5F;
    /** Summed activity around a peak needed before it counts as a hidden player, and where it reaches full strength. */
    private static final float HIDDEN_MIN_ACTIVITY = 8.0F;
@@ -519,7 +519,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    }
 
    /**
-    * Reads Player Bypass 2's inference (shared with that module when it is on too): chunks outside
+    * Reads Player Bypass's inference (shared with that module when it is on too): chunks outside
     * your simulation distance that keep ticking point at a player loading them, and hidden
     * attackers or item pickups pin one exactly.
     */
@@ -544,8 +544,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.collectBreakers(mc, level, now);
       this.collectOpens(level, now);
       this.collectChanges(now);
-      // Player Bypass 2's ring inference only works in the overworld; the two checks above work everywhere.
-      if (PlayerBypass2Module.netherOrEnd(level)) {
+      // Player Bypass's ring inference only works in the overworld; the two checks above work everywhere.
+      if (PlayerBypassModule.netherOrEnd(level)) {
          this.pinSeen = SimulationSignals.pinTotal();
       } else {
          SimulationSignals.pinsSince(this.pinSeen, pin -> {
@@ -717,7 +717,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       }
    }
 
-   /** The same field Player Bypass 2 builds: each ticking chunk votes for every chunk within simulation distance of it. */
+   /** The same field Player Bypass builds: each ticking chunk votes for every chunk within simulation distance of it. */
    private void inferHidden(ClientPlayerEntity self, long now) {
       long nanos = SimulationSignals.now();
       int sim = SimulationSignals.simulation();

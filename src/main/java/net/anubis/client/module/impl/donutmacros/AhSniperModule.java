@@ -12,8 +12,8 @@ import net.anubis.client.module.setting.StringSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +32,9 @@ public final class AhSniperModule extends ClientModule {
    );
    private final NumberSetting minHours = this.addSetting("min-hours", new NumberSetting("Min Time Left (h)", 0.0F, 0.0F, 48.0F).step(0.5F));
    private final NumberSetting refresh = this.addSetting("refresh", new NumberSetting("Refresh Every (ms)", 300.0F, 100.0F, 2000.0F).step(50.0F));
+   private final NumberSetting settle = this.addSetting("settle", new NumberSetting("Wait After Page Change (ms)", 200.0F, 50.0F, 1000.0F).step(25.0F));
+   private final StringSetting budget = this.addSetting("budget", new StringSetting("Max Total Spend", "").hint("e.g. 500m, empty = no limit"));
+   private final BooleanSetting requireConfirm = this.addSetting("require-confirm", new BooleanSetting("Only Buy With Confirm", false));
    private final NumberSetting maxBuys = this.addSetting("max-buys", new NumberSetting("Stop After (buys, 0 = never)", 0.0F, 0.0F, 100.0F).step(1.0F));
    private final BooleanSetting autoSell = this.addSetting("auto-sell", new BooleanSetting("Auto Sell", false));
    private final StringSetting sellPrice = this.addSetting("sell-price", new StringSetting("Sell Price (each)", "").hint("e.g. 60m"));
@@ -68,6 +71,16 @@ public final class AhSniperModule extends ClientModule {
                this.say(ModuleChat.body().warn("Pick an item to snipe first."));
                this.requestDisable();
             } else {
+               long spendLimit = 0L;
+               if (!this.budget.get().isBlank()) {
+                  spendLimit = ServerText.parseMoney(this.budget.get());
+                  if (spendLimit <= 0L) {
+                     this.say(ModuleChat.body().warn("Set Max Total Spend to a price like 500m, or leave it empty."));
+                     this.requestDisable();
+                     return;
+                  }
+               }
+
                long sell = 0L;
                if (this.autoSell.get()) {
                   sell = ServerText.parseMoney(this.sellPrice.get());
@@ -84,7 +97,19 @@ public final class AhSniperModule extends ClientModule {
                   }
                }
 
-               SniperBot created = new SniperBot(this, this.worker, target, this.refresh.getInt(), this.maxBuys.getInt(), sell, mc.getSession().getUsername());
+               SniperBot created = new SniperBot(
+                  this,
+                  this::stopFromBot,
+                  this.worker,
+                  target,
+                  this.refresh.getInt(),
+                  this.settle.getInt(),
+                  spendLimit,
+                  this.requireConfirm.get(),
+                  this.maxBuys.getInt(),
+                  sell,
+                  mc.getSession().getUsername()
+               );
                this.bot = created;
                this.worker.start(created::run, failure -> {
                   LOGGER.error("[Anubis] AH Sniper stopped", failure);

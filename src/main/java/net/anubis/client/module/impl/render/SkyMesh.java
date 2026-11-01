@@ -5,7 +5,6 @@ import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderPipeline.Builder;
-import com.mojang.blaze3d.pipeline.RenderPipeline.Snippet;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.systems.RenderSystem.ShapeIndexBuffer;
@@ -14,15 +13,15 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.util.Identifier;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.client.util.BufferAllocator;
+import net.minecraft.client.gl.Framebuffer;
+import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.client.render.BufferBuilder;
 import net.minecraft.client.render.BuiltBuffer;
+import net.minecraft.client.render.VertexFormats;
+import net.minecraft.client.util.BufferAllocator;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.util.Identifier;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fStack;
 import org.joml.Vector3f;
@@ -48,7 +47,7 @@ final class SkyMesh {
    }
 
    private static RenderPipeline pipeline(String name, BlendFunction blend) {
-      Builder builder = RenderPipeline.builder(new Snippet[]{RenderPipelines.TRANSFORMS_AND_PROJECTION_SNIPPET})
+      Builder builder = RenderPipeline.builder(RenderPipelines.TRANSFORMS_AND_PROJECTION_SNIPPET)
          .withLocation(Identifier.of("anubis", "pipeline/" + name))
          .withVertexShader("core/position_color")
          .withFragmentShader("core/position_color")
@@ -68,42 +67,19 @@ final class SkyMesh {
 
    void upload(BufferBuilder builder) {
       this.built = true;
-      BuiltBuffer mesh = builder.endNullable();
 
-      label47: {
-         try {
-            if (mesh == null) {
-               this.indexCount = 0;
-               break label47;
-            }
-
-            if (this.buffer == null) {
-               this.buffer = RenderSystem.getDevice().createBuffer(() -> this.label, 40, this.maxQuads * 4L * VERTEX_SIZE);
-            }
-
-            RenderSystem.getDevice().createCommandEncoder().writeToBuffer(this.buffer.slice(0L, mesh.getBuffer().remaining()), mesh.getBuffer());
-            this.indexCount = mesh.getDrawParameters().indexCount();
-         } catch (Throwable var6) {
-            if (mesh != null) {
-               try {
-                  mesh.close();
-               } catch (Throwable var5) {
-                  var6.addSuppressed(var5);
-               }
-            }
-
-            throw var6;
+      try (BuiltBuffer mesh = builder.endNullable()) {
+         if (mesh == null) {
+            this.indexCount = 0;
+            return;
          }
 
-         if (mesh != null) {
-            mesh.close();
+         if (this.buffer == null) {
+            this.buffer = RenderSystem.getDevice().createBuffer(() -> this.label, 40, this.maxQuads * 4L * VERTEX_SIZE);
          }
 
-         return;
-      }
-
-      if (mesh != null) {
-         mesh.close();
+         RenderSystem.getDevice().createCommandEncoder().writeToBuffer(this.buffer.slice(0L, mesh.getBuffer().remaining()), mesh.getBuffer());
+         this.indexCount = mesh.getDrawParameters().indexCount();
       }
    }
 
@@ -122,31 +98,18 @@ final class SkyMesh {
             GpuBufferSlice transforms = RenderSystem.getDynamicUniforms()
                .write(modelView, new Vector4f(1.0F, 1.0F, 1.0F, alpha), new Vector3f(), new Matrix4f());
             Framebuffer target = MinecraftClient.getInstance().getFramebuffer();
-            RenderPass pass = RenderSystem.getDevice()
-               .createCommandEncoder()
-               .createRenderPass(() -> this.label, target.getColorAttachmentView(), OptionalInt.empty(), target.getDepthAttachmentView(), OptionalDouble.empty());
 
-            try {
+            try (RenderPass pass = RenderSystem.getDevice()
+                  .createCommandEncoder()
+                  .createRenderPass(
+                     () -> this.label, target.getColorAttachmentView(), OptionalInt.empty(), target.getDepthAttachmentView(), OptionalDouble.empty()
+                  )) {
                pass.setPipeline(this.pipeline);
                RenderSystem.bindDefaultUniforms(pass);
                pass.setUniform("DynamicTransforms", transforms);
                pass.setVertexBuffer(0, this.buffer);
                pass.setIndexBuffer(indices.getIndexBuffer(this.indexCount), indices.getIndexType());
                pass.drawIndexed(0, 0, this.indexCount, 1);
-            } catch (Throwable var15) {
-               if (pass != null) {
-                  try {
-                     pass.close();
-                  } catch (Throwable var14) {
-                     var15.addSuppressed(var14);
-                  }
-               }
-
-               throw var15;
-            }
-
-            if (pass != null) {
-               pass.close();
             }
          } finally {
             modelView.popMatrix();

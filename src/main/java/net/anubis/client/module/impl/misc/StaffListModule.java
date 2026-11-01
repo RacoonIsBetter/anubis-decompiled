@@ -33,21 +33,20 @@ import net.anubis.client.util.staff.StaffAlarm;
 import net.anubis.client.util.staff.StaffMatcher;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.sound.PositionedSoundInstance;
-import net.minecraft.world.GameMode;
-import net.minecraft.text.Text;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.scoreboard.Team;
-import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.s2c.play.BundleS2CPacket;
-
+import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket.Action;
+import net.minecraft.scoreboard.Team;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.Text;
+import net.minecraft.world.GameMode;
 
 @Environment(EnvType.CLIENT)
 public final class StaffListModule extends ClientModule {
@@ -72,7 +71,10 @@ public final class StaffListModule extends ClientModule {
       "Owen1212055",
       "Splaterd",
       "Fallerfly",
-      "Bloodspulse"
+      "Bloodspulse",
+      "_chaon",
+      "Dough4",
+      "evify"
    );
    private static final Set<String> STAFF_KEYS = staffKeys();
    private static final StaffMatcher RANKS = new StaffMatcher(
@@ -227,6 +229,22 @@ public final class StaffListModule extends ClientModule {
          return seen != null && seen.marked(System.currentTimeMillis());
       } else {
          return false;
+      }
+   }
+
+   public static void provenHere(UUID id, String name) {
+      StaffListModule module = instance();
+      if (module != null && module.isEnabled() && module.regionAlert.get() && id != null && name != null) {
+         long now = System.currentTimeMillis();
+         StaffListModule.Sighting seen = module.sightings.computeIfAbsent(id, key -> new StaffListModule.Sighting());
+         if (!seen.marked(now)) {
+            module.resort = true;
+         }
+
+         seen.prove(now);
+         if (!seen.coolingDown(now)) {
+            module.alert(id, seen, now, name);
+         }
       }
    }
 

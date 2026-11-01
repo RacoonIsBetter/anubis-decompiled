@@ -12,7 +12,10 @@ import net.minecraft.util.Util;
 public final class CommunityPopup {
    public static final String INVITE = "discord.gg/anubis";
    public static final String INVITE_URL = "https://discord.gg/anubis";
+   public static final String BETS = "donutbets.net";
+   public static final String BETS_URL = "https://donutbets.net";
    private static final float OPEN_DELAY = 0.6F;
+   private static final float NEXT_DELAY = 0.35F;
    private static final float MARK_RING = 54.0F;
    private static final float MARK_GAP = 14.0F;
    private static final float LINE_GAP = 3.0F;
@@ -28,23 +31,37 @@ public final class CommunityPopup {
    private static final float CLYDE_EYE_RX = 0.18F;
    private static final float CLYDE_EYE_RY = 0.2F;
    private static boolean offered;
+   private static boolean betsOffered;
    private final DuskWidgets ui = new DuskWidgets();
    private final MenuFrame frame = new MenuFrame();
    private DuskWidgets.Dialog dialog;
+   private CommunityPopup.Offer offer = CommunityPopup.Offer.DISCORD;
    private boolean dontShowAgain;
    private long openedAt;
+   private float closedAt;
 
    public void update(float menuTime, boolean live) {
       if (this.dialog != null && this.dialog.isClosed()) {
          this.dialog = null;
+         this.closedAt = menuTime;
       }
 
-      if (this.dialog == null) {
-         if (live && !offered && menuTime >= 0.6F) {
+      if (this.dialog == null && live) {
+         if (!offered) {
+            if (menuTime < 0.6F) {
+               return;
+            }
+
             offered = true;
             if (ThemeStore.get().communityPopup.get()) {
-               this.open();
+               this.open(CommunityPopup.Offer.DISCORD);
+               return;
             }
+         }
+
+         if (!betsOffered && menuTime >= Math.max(0.6F, this.closedAt + 0.35F)) {
+            betsOffered = true;
+            this.open(CommunityPopup.Offer.DONUTBETS);
          }
       }
    }
@@ -74,22 +91,25 @@ public final class CommunityPopup {
       return true;
    }
 
-   private void open() {
+   private void open(CommunityPopup.Offer next) {
+      this.offer = next;
       this.dontShowAgain = false;
       this.openedAt = System.nanoTime();
-      this.dialog = new DuskWidgets.Dialog("Join Anubis Community", "Updates, configs and support. Come say hi.")
-         .content(88.0F, this::drawContent)
-         .action("Join", this::join)
-         .cancel("Later", this::answered);
+      this.dialog = next == CommunityPopup.Offer.DISCORD
+         ? new DuskWidgets.Dialog("Join Anubis Community", "Updates, configs and support. Come say hi.")
+            .content(88.0F, this::drawContent)
+            .action("Join", this::join)
+            .cancel("Later", this::answered)
+         : new DuskWidgets.Dialog("Check out DonutBets", "").content(54.0F, this::drawContent).action("Visit", this::join).cancel("Later");
    }
 
    private void join() {
-      Util.getOperatingSystem().open("https://discord.gg/anubis");
+      Util.getOperatingSystem().open(this.offer.url);
       this.answered();
    }
 
    private void answered() {
-      if (this.dontShowAgain) {
+      if (this.dontShowAgain && this.offer == CommunityPopup.Offer.DISCORD) {
          ThemeStore theme = ThemeStore.get();
          theme.communityPopup.set(false);
          theme.save();
@@ -103,11 +123,12 @@ public final class CommunityPopup {
       float a = ui.alpha();
       ImFont captionFont = f.tagFont();
       ImFont inviteFont = f.menuFont();
-      String caption = "DISCORD";
+      String caption = this.offer.caption;
+      String invite = this.offer.link;
       float ring = 54.0F * s;
       float track = 4.0F * s;
       float captionW = f.spacedWidth(captionFont, caption, track);
-      float inviteW = f.textWidth(inviteFont, "discord.gg/anubis");
+      float inviteW = f.textWidth(inviteFont, invite);
       float groupW = ring + 14.0F * s + Math.max(captionW, inviteW);
       float gx = x + (w - groupW) * 0.5F;
       boolean over = ui.hovered(gx, y, groupW, ring);
@@ -120,7 +141,14 @@ public final class CommunityPopup {
       float cy = y + ring * 0.5F - 2.0F * s;
       float r = ring * 0.44F;
       DuskWidgets.shenRing(dl, cx, cy, r, k, s, a);
-      discordMark(dl, cx, cy, r * 1.1F, EgyptDraw.col(EgyptDraw.mix(-1326998, -16777216, k), a), EgyptDraw.col(EgyptDraw.mix(-16120059, -871878, k), a));
+      int ink = EgyptDraw.col(EgyptDraw.mix(-1326998, -16777216, k), a);
+      int hole = EgyptDraw.col(EgyptDraw.mix(-16120059, -871878, k), a);
+      if (this.offer == CommunityPopup.Offer.DISCORD) {
+         discordMark(dl, cx, cy, r * 1.1F, ink, hole);
+      } else {
+         donutMark(dl, cx, cy, r, ink, hole);
+      }
+
       float captionH = f.textHeight(captionFont);
       float inviteH = f.textHeight(inviteFont);
       float tx = gx + ring + 14.0F * s;
@@ -128,27 +156,29 @@ public final class CommunityPopup {
       f.spacedText(dl, captionFont, tx, ty, track, -7372954, a, caption);
       float inviteY = ty + captionH + 3.0F * s;
       float underY = inviteY + inviteH + s;
-      f.text(dl, inviteFont, tx, inviteY, EgyptDraw.mix(-871878, -11654, k), a, "discord.gg/anubis");
+      f.text(dl, inviteFont, tx, inviteY, EgyptDraw.mix(-871878, -11654, k), a, invite);
       if (k > 0.01F) {
          dl.addLine(tx, underY, tx + inviteW * k, underY, EgyptDraw.col(-11654, k * a), Math.max(1.0F, s));
       }
 
-      ImFont labelFont = f.tagFont();
-      String label = "Don't show again";
-      float box = 16.0F * s;
-      float reach = 5.0F * s;
-      float rowW = box + 9.0F * s + f.textWidth(labelFont, label);
-      float bx = x + (w - rowW) * 0.5F;
-      float by = y + h - box;
-      boolean overCheck = ui.hovered(bx, by - reach, rowW, box + 2.0F * reach);
-      if (ui.pressed(bx, by - reach, rowW, box + 2.0F * reach)) {
-         this.dontShowAgain = !this.dontShowAgain;
-      }
+      if (this.offer == CommunityPopup.Offer.DISCORD) {
+         ImFont labelFont = f.tagFont();
+         String label = "Don't show again";
+         float box = 16.0F * s;
+         float reach = 5.0F * s;
+         float rowW = box + 9.0F * s + f.textWidth(labelFont, label);
+         float bx = x + (w - rowW) * 0.5F;
+         float by = y + h - box;
+         boolean overCheck = ui.hovered(bx, by - reach, rowW, box + 2.0F * reach);
+         if (ui.pressed(bx, by - reach, rowW, box + 2.0F * reach)) {
+            this.dontShowAgain = !this.dontShowAgain;
+         }
 
-      float kc = ui.hover("dont-show-again", overCheck);
-      checkBox(dl, bx, by, box, this.dontShowAgain, kc, s, a);
-      int labelColor = EgyptDraw.mix(this.dontShowAgain ? -1326998 : -7372954, -11654, kc);
-      f.text(dl, labelFont, bx + box + 9.0F * s, by + (box - f.textHeight(labelFont)) * 0.5F + s, labelColor, a, label);
+         float kc = ui.hover("dont-show-again", overCheck);
+         checkBox(dl, bx, by, box, this.dontShowAgain, kc, s, a);
+         int labelColor = EgyptDraw.mix(this.dontShowAgain ? -1326998 : -7372954, -11654, kc);
+         f.text(dl, labelFont, bx + box + 9.0F * s, by + (box - f.textHeight(labelFont)) * 0.5F + s, labelColor, a, label);
+      }
    }
 
    private static void checkBox(ImDrawList dl, float x, float y, float size, boolean checked, float k, float s, float a) {
@@ -188,6 +218,21 @@ public final class CommunityPopup {
          }
 
          dl.pathFillConvex(hole);
+      }
+   }
+
+   private static void donutMark(ImDrawList dl, float cx, float cy, float r, int ink, int hole) {
+      dl.addCircleFilled(cx, cy, r * 0.74F, ink, 40);
+      dl.addCircleFilled(cx, cy, r * 0.27F, hole, 28);
+      float thick = Math.max(1.2F, r * 0.075F);
+
+      for (int i = 0; i < 7; i++) {
+         double angle = i * Math.PI * 2.0 / 7.0 + 0.35;
+         float sx = cx + (float)Math.cos(angle) * r * 0.505F;
+         float sy = cy + (float)Math.sin(angle) * r * 0.505F;
+         float dx = (float)Math.cos(angle + 1.1 + i % 3 * 0.6) * r * 0.075F;
+         float dy = (float)Math.sin(angle + 1.1 + i % 3 * 0.6) * r * 0.075F;
+         dl.addLine(sx - dx, sy - dy, sx + dx, sy + dy, hole, thick);
       }
    }
 
@@ -235,5 +280,21 @@ public final class CommunityPopup {
       points[n] = x;
       points[n + 1] = y;
       return n + 2;
+   }
+
+   @Environment(EnvType.CLIENT)
+   private enum Offer {
+      DISCORD("DISCORD", "discord.gg/anubis", "https://discord.gg/anubis"),
+      DONUTBETS("DONUTBETS", "donutbets.net", "https://donutbets.net");
+
+      final String caption;
+      final String link;
+      final String url;
+
+      Offer(String caption, String link, String url) {
+         this.caption = caption;
+         this.link = link;
+         this.url = url;
+      }
    }
 }

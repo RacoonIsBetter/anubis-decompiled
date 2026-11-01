@@ -12,34 +12,33 @@ import net.anubis.client.util.pvp.RotationUtils;
 import net.anubis.client.util.pvp.ServerRotation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.util.Hand;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockEntityProvider;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.FallingBlock;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.Block;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.block.BlockEntityProvider;
-import net.minecraft.block.FallingBlock;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.shape.VoxelShape;
-import net.minecraft.block.BlockState;
-import net.minecraft.world.EmptyBlockView;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.world.RaycastContext;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult.Success;
 import net.minecraft.util.ActionResult.SwingSource;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult.Type;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Direction.Axis;
 import net.minecraft.util.math.Direction.AxisDirection;
-
-
+import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.world.EmptyBlockView;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.world.RaycastContext.FluidHandling;
 import net.minecraft.world.RaycastContext.ShapeType;
 
@@ -61,7 +60,7 @@ public final class AnchorGuard {
 
       for (Vec3d point : points) {
          BlockHitResult hit = level.raycast(new RaycastContext(point, blast, ShapeType.COLLIDER, FluidHandling.NONE, player));
-         if (hit.getType() == net.minecraft.util.hit.HitResult.Type.MISS || hit.getBlockPos().equals(anchor)) {
+         if (hit.getType() == Type.MISS || hit.getBlockPos().equals(anchor)) {
             open.add(point);
          }
       }
@@ -174,10 +173,24 @@ public final class AnchorGuard {
    public static Vec3d anchorAim(ClientWorld level, ClientPlayerEntity player, BlockPos anchor) {
       Vec3d eye = player.getEyePos();
       Box box = new Box(anchor).contract(0.1);
+      Rotation sent = ServerRotation.sent();
+      if (sent != null) {
+         Vec3d direction = Vec3d.fromPolar(sent.pitch(), sent.yaw());
+         double along = box.getCenter().subtract(eye).dotProduct(direction);
+         if (along > 0.0) {
+            Vec3d on = eye.add(direction.multiply(along));
+            Vec3d toward = new Vec3d(
+               MathHelper.clamp(on.x, box.minX, box.maxX), MathHelper.clamp(on.y, box.minY, box.maxY), MathHelper.clamp(on.z, box.minZ, box.maxZ)
+            );
+            BlockHitResult hit = trace(level, player, ServerRotation.next(player, RotationUtils.fromTo(eye, toward)));
+            if (hit != null && hit.getBlockPos().equals(anchor)) {
+               return toward;
+            }
+         }
+      }
+
       Vec3d point = new Vec3d(
-         MathHelper.clamp(eye.x, box.minX, box.maxX),
-         MathHelper.clamp(eye.y, box.minY, box.maxY),
-         MathHelper.clamp(eye.z, box.minZ, box.maxZ)
+         MathHelper.clamp(eye.x, box.minX, box.maxX), MathHelper.clamp(eye.y, box.minY, box.maxY), MathHelper.clamp(eye.z, box.minZ, box.maxZ)
       );
       BlockHitResult hit = trace(level, player, ServerRotation.next(player, RotationUtils.fromTo(eye, point)));
       return hit != null && hit.getBlockPos().equals(anchor) ? point : null;
@@ -259,7 +272,7 @@ public final class AnchorGuard {
       Vec3d eye = player.getEyePos();
       Vec3d reach = Vec3d.fromPolar(look.pitch(), look.yaw()).multiply(player.getBlockInteractionRange());
       BlockHitResult hit = level.raycast(new RaycastContext(eye, eye.add(reach), ShapeType.OUTLINE, FluidHandling.NONE, player));
-      return hit.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK ? hit : null;
+      return hit.getType() == Type.BLOCK ? hit : null;
    }
 
    private static int shade(Box box, Vec3d blast, List<Vec3d> points) {

@@ -10,24 +10,32 @@ import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AfterTick;
-import net.minecraft.text.Text;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.multiplayer.ConnectScreen;
-import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.screen.DisconnectedScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
+import net.minecraft.client.gui.screen.multiplayer.ConnectScreen;
 import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
+import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.network.ServerAddress;
 import net.minecraft.client.network.ServerInfo;
+import net.minecraft.text.Text;
+import net.minecraft.util.Util;
 
 @Environment(EnvType.CLIENT)
 public final class AutoReconnectModule extends ClientModule {
+   private static final long HOLD_MS = 15000L;
+   private static volatile long holdUntil;
    private final NumberSetting delay = this.addSetting("delay", new NumberSetting("Delay", 5.0F, 3.0F, 60.0F).step(1.0F));
    private ServerInfo lastServer;
    private Screen activeScreen;
    private ButtonWidget reconnectButton;
    private int ticksLeft;
+   private boolean heldScreen;
+
+   public static void holdOff() {
+      holdUntil = Util.getMeasuringTimeMs() + 15000L;
+   }
 
    public AutoReconnectModule() {
       super("auto-reconnect", "Auto Reconnect", "Reconnects to the last server after an unexpected disconnect.", ModuleCategory.MISC);
@@ -48,14 +56,16 @@ public final class AutoReconnectModule extends ClientModule {
          this.lastServer = null;
       } else if (screen instanceof DisconnectedScreen && this.lastServer != null) {
          ServerInfo server = this.lastServer;
-         boolean auto = this.isEnabled();
          if (screen == this.activeScreen) {
             Screens.getButtons(screen).remove(this.reconnectButton);
          } else {
             this.activeScreen = screen;
             this.ticksLeft = Math.round(this.delay.get() * 20.0F);
+            this.heldScreen = Util.getMeasuringTimeMs() < holdUntil || isBan(screen);
+            holdUntil = 0L;
          }
 
+         boolean auto = this.isEnabled() && !this.heldScreen;
          ButtonWidget button = ButtonWidget.builder(reconnectLabel(auto, this.ticksLeft), btn -> {
             btn.active = false;
             this.reconnect(client, server);
@@ -74,6 +84,11 @@ public final class AutoReconnectModule extends ClientModule {
             });
          }
       }
+   }
+
+   private static boolean isBan(Screen screen) {
+      String reason = screen.getNarratedTitle().getString().toLowerCase(Locale.ROOT);
+      return reason.contains("banned") || reason.contains("blacklisted");
    }
 
    private void reconnect(MinecraftClient client, ServerInfo server) {

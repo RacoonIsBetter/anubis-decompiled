@@ -56,10 +56,6 @@ public final class Shapes {
       return new Shapes.Plane(0.0F, y, 0.0F, 0.0F, -1.0F, 0.0F);
    }
 
-   public static Strand bezier(float ax, float ay, float az, float cx, float cy, float cz, float bx, float by, float bz, float r0, float r1) {
-      return Strand.of(new float[]{ax, ay, az, r0, cx, cy, cz, (r0 + r1) * 0.5F, bx, by, bz, r1}, true);
-   }
-
    public static Strand strand(float r0, float r1, float... xyz) {
       return Strand.tapered(r0, r1, xyz);
    }
@@ -70,10 +66,6 @@ public final class Shapes {
 
    public static Shape extrude(Shape2D profile, float halfDepth, float round) {
       return new Shapes.Extrude(profile, halfDepth, round);
-   }
-
-   public static Shape revolve(Shape2D profile) {
-      return new Shapes.Revolve(profile);
    }
 
    public static Shape field(Shapes.Field field, float minX, float minY, float minZ, float maxX, float maxY, float maxZ) {

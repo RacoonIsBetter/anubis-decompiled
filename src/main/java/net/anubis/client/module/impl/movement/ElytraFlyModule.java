@@ -24,22 +24,22 @@ import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.block.BlockState;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.world.RaycastContext;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.component.DataComponentTypes;
-import net.minecraft.util.hit.HitResult.Type;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.OnGroundOnly;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.OnGroundOnly;
+import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult.Type;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.world.RaycastContext.FluidHandling;
 import net.minecraft.world.RaycastContext.ShapeType;
 
@@ -171,8 +171,7 @@ public final class ElytraFlyModule extends ClientModule {
          this.currentMode = this.createMode(this.modeType);
          this.currentMode.onActivate();
          if (!this.modeRequestedDisable) {
-            if ((this.chestSwap.is("Always") || this.chestSwap.is("WaitForGround"))
-               && player.getEquippedStack(EquipmentSlot.CHEST).getItem() != Items.ELYTRA) {
+            if ((this.chestSwap.is("Always") || this.chestSwap.is("WaitForGround")) && player.getEquippedStack(EquipmentSlot.CHEST).getItem() != Items.ELYTRA) {
                ElytraFlyInventory.chestSwap();
             }
 
@@ -323,22 +322,20 @@ public final class ElytraFlyModule extends ClientModule {
                   mode.handleVerticalSpeed(event);
                }
 
-               int chunkX = (int)((player.getX() + mode.velX) / 16.0);
-               int chunkZ = (int)((player.getZ() + mode.velZ) / 16.0);
-               if (this.dontGoIntoUnloadedChunks.get()) {
-                  if (mc.world.getChunkManager().isChunkLoaded(chunkX, chunkZ)) {
-                     if (!bounce) {
+               if (!bounce) {
+                  int chunkX = (int)((player.getX() + mode.velX) / 16.0);
+                  int chunkZ = (int)((player.getZ() + mode.velZ) / 16.0);
+                  if (this.dontGoIntoUnloadedChunks.get()) {
+                     if (mc.world.getChunkManager().isChunkLoaded(chunkX, chunkZ)) {
                         setMovement(player, aliased, event, mode.velX, mode.velY, mode.velZ);
+                     } else {
+                        mode.zeroAcceleration();
+                        setMovement(player, aliased, event, 0.0, mode.velY, 0.0);
                      }
                   } else {
-                     mode.zeroAcceleration();
-                     setMovement(player, aliased, event, 0.0, mode.velY, 0.0);
+                     setMovement(player, aliased, event, mode.velX, mode.velY, mode.velZ);
                   }
-               } else if (!bounce) {
-                  setMovement(player, aliased, event, mode.velX, mode.velY, mode.velZ);
-               }
 
-               if (!bounce) {
                   mode.onPlayerMove();
                }
             } else if (mode.lastForwardPressed && !bounce) {
@@ -350,11 +347,7 @@ public final class ElytraFlyModule extends ClientModule {
                Vec3d position = player.getEntityPos();
                Vec3d lookAheadPos = position.add(player.getVelocity().normalize().multiply(this.crashLookAhead.getInt()));
                RaycastContext context = new RaycastContext(
-                  position,
-                  new Vec3d(lookAheadPos.x, player.getY(), lookAheadPos.z),
-                  ShapeType.COLLIDER,
-                  FluidHandling.NONE,
-                  player
+                  position, new Vec3d(lookAheadPos.x, player.getY(), lookAheadPos.z), ShapeType.COLLIDER, FluidHandling.NONE, player
                );
                BlockHitResult hitResult = mc.world.raycast(context);
                if (hitResult != null && hitResult.getType() == Type.BLOCK) {

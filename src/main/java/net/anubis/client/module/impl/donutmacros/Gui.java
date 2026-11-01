@@ -5,17 +5,17 @@ import java.util.List;
 import java.util.function.Predicate;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.registry.Registries;
+import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.slot.Slot;
+import net.minecraft.screen.slot.SlotActionType;
 
 @Environment(EnvType.CLIENT)
 final class Gui {
@@ -43,17 +43,9 @@ final class Gui {
       return this.worker.call(() -> mc().currentScreen == null ? "" : ServerText.normalize(mc().currentScreen.getTitle()));
    }
 
-   boolean containerOpen() {
-      return this.worker.call(Gui::containerOpenNow);
-   }
-
    static boolean containerOpenNow() {
       ClientPlayerEntity player = mc().player;
       return player != null && player.currentScreenHandler != player.playerScreenHandler && mc().currentScreen instanceof HandledScreen;
-   }
-
-   int syncId() {
-      return this.worker.call(() -> player().currentScreenHandler.syncId);
    }
 
    static List<ItemStack> containerNow() {
@@ -86,12 +78,7 @@ final class Gui {
       }
 
       for (ItemStack stack : containerNow()) {
-         text.append(Registries.ITEM.getId(stack.getItem()))
-            .append(':')
-            .append(stack.getCount())
-            .append(':')
-            .append(stack.getName().getString())
-            .append('|');
+         text.append(Registries.ITEM.getId(stack.getItem())).append(':').append(stack.getCount()).append(':').append(stack.getName().getString()).append('|');
       }
 
       return text.toString();

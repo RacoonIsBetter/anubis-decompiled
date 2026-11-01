@@ -20,11 +20,15 @@
     {
       "config": "anubis.indigo.mixins.json",
       "environment": "client"
+    },
+    {
+      "config": "anubis.easyplace.mixins.json",
+      "environment": "client"
     }
   ],
   "entrypoints": {
     "preLaunch": [
-      "net.anubis.bootstrap.AnubisNativeBootstrap"
+      "net.anubis.client.security.EarlyBuildCheck"
     ],
     "client": [
       "net.anubis.client.AnubisClientMod"
@@ -38,6 +42,7 @@
   "depends": {
     "fabricloader": ">=0.16.0",
     "minecraft": "~1.21.11",
+    "fabric-api": "*",
     "java": ">=21",
     "fabric-key-binding-api-v1": "*",
     "fabric-lifecycle-events-v1": "*",
@@ -46,7 +51,8 @@
     "fabric-screen-api-v1": "*"
   },
   "suggests": {
-    "anubis-jsmacros": "*"
+    "anubis-jsmacros": "*",
+    "litematica": "*"
   },
   "breaks": {
     "embeddium": "*",

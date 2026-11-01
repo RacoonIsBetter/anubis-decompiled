@@ -4,10 +4,10 @@ import java.util.function.Consumer;
 import net.anubis.client.chat.ModuleChat;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
+import net.minecraft.screen.slot.SlotActionType;
 
 @Environment(EnvType.CLIENT)
 final class OrdersNav {
@@ -26,20 +26,24 @@ final class OrdersNav {
          say.accept(ModuleChat.body().warn("Could not open /orders."));
          gui.closeAll();
          return false;
-      } else {
-         String before = gui.fingerprint();
-         gui.click(51, 0, SlotActionType.PICKUP);
-         if (worker.waitFor(OrdersNav::isYourOrdersNow, 2500L)) {
+      }
+
+      String before = gui.fingerprint();
+      gui.click(51, 0, SlotActionType.PICKUP);
+      if (worker.waitFor(OrdersNav::isYourOrdersNow, 2500L)) {
+         return true;
+      }
+
+      if (gui.waitChange(before, 1000L)) {
+         worker.sleep(150L);
+         if (worker.call(Gui::containerOpenNow) && !worker.call(OrdersNav::isOrdersRootNow)) {
             return true;
-         } else if (gui.waitChange(before, 1000L)) {
-            worker.sleep(150L);
-            return true;
-         } else {
-            say.accept(ModuleChat.body().warn("Could not open Your Orders."));
-            gui.closeAll();
-            return false;
          }
       }
+
+      say.accept(ModuleChat.body().warn("Could not open Your Orders."));
+      gui.closeAll();
+      return false;
    }
 
    static boolean isOrdersRootNow() {

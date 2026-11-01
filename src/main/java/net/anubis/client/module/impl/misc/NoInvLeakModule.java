@@ -1,6 +1,8 @@
 package net.anubis.client.module.impl.misc;
 
+import com.example.client.mixin.AccessorCreativeSlotWrapper;
 import com.sun.jna.Platform;
+import net.anubis.client.chat.ModuleChat;
 import net.anubis.client.config.ModuleConfigStore;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
@@ -11,13 +13,16 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.screen.slot.Slot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.screen.slot.Slot;
+import org.joml.Vector2f;
 
 @Environment(EnvType.CLIENT)
 public final class NoInvLeakModule extends ClientModule {
@@ -27,6 +32,8 @@ public final class NoInvLeakModule extends ClientModule {
    private static final int OFFHAND_SEED = 10;
    private static volatile NoInvLeakModule active;
    private static ItemStack totem;
+   private static boolean bareModel;
+   private static final Vector2f POINT = new Vector2f();
    private final ModeSetting style = this.addSetting("style", new ModeSetting("Style", "Totem", "Totem", "Random", "Empty"));
    private final BooleanSetting fillEmpty = this.addSetting("fill-empty", new BooleanSetting("Fill Empty Slots", true));
    private final BooleanSetting streamOnly = this.addSetting("stream-only", new BooleanSetting("Stream Only", false));
@@ -61,6 +68,7 @@ public final class NoInvLeakModule extends ClientModule {
    @Override
    protected void onEnable() {
       this.loadout.reseed();
+      StreamOverlay.retry();
       active = this;
    }
 
@@ -74,7 +82,7 @@ public final class NoInvLeakModule extends ClientModule {
       NoInvLeakModule module = active;
       if (module != null && stack != null) {
          int slot = seed == 10 ? 40 : (seed >= 1 && seed <= 9 ? seed - 1 : 41);
-         if (module.streamOverlaying()) {
+         if (module.streamOverlaying() && StreamOverlay.recordsHotbar()) {
             StreamOverlay.hotbar(slot, x, y, stack);
             return ItemStack.EMPTY;
          } else {
@@ -87,13 +95,60 @@ public final class NoInvLeakModule extends ClientModule {
 
    public static ItemStack container(ItemStack stack, Slot slot, int x, int y, boolean hovered) {
       NoInvLeakModule module = active;
-      if (module == null || stack == null) {
-         return stack;
-      } else if (module.streamOverlaying()) {
-         StreamOverlay.container(slot.getIndex(), x, y, stack, hovered);
-         return ItemStack.EMPTY;
+      if (module != null && stack != null) {
+         int index = inventoryIndex(slot);
+         if (module.streamOverlaying()) {
+            StreamOverlay.container(index, x, y, stack, hovered);
+            return ItemStack.EMPTY;
+         } else {
+            return module.shown(stack, index);
+         }
       } else {
-         return module.shown(stack, slot.getIndex());
+         return stack;
+      }
+   }
+
+   private static int inventoryIndex(Slot slot) {
+      Slot real = slot instanceof AccessorCreativeSlotWrapper wrapper ? wrapper.anubis$target() : slot;
+      return real.getIndex();
+   }
+
+   public static ItemStack dragged(ItemStack stack) {
+      NoInvLeakModule module = active;
+      if (module != null && stack != null && !stack.isEmpty()) {
+         return module.streamOverlaying() ? ItemStack.EMPTY : module.fake(stack, 41);
+      } else {
+         return stack;
+      }
+   }
+
+   public static boolean hidesModelOf(LivingEntity entity) {
+      return active != null && entity != null && entity == MinecraftClient.getInstance().player;
+   }
+
+   public static void bareModel(boolean on) {
+      bareModel = on;
+   }
+
+   public static ItemStack modelItem(LivingEntity entity, ItemStack stack) {
+      return bareModel && stack != null && !stack.isEmpty() && entity == MinecraftClient.getInstance().player ? ItemStack.EMPTY : stack;
+   }
+
+   public static int screenX(DrawContext guiGraphics, int localX, int localY, int fallback) {
+      if (guiGraphics != null && active != null) {
+         guiGraphics.getMatrices().transformPosition(localX, localY, POINT);
+         return Math.round(POINT.x);
+      } else {
+         return fallback;
+      }
+   }
+
+   public static int screenY(DrawContext guiGraphics, int localX, int localY, int fallback) {
+      if (guiGraphics != null && active != null) {
+         guiGraphics.getMatrices().transformPosition(localX, localY, POINT);
+         return Math.round(POINT.y);
+      } else {
+         return fallback;
       }
    }
 
@@ -155,6 +210,13 @@ public final class NoInvLeakModule extends ClientModule {
    public static boolean overlayWanted() {
       NoInvLeakModule module = active;
       return module != null && module.streamOnly.get();
+   }
+
+   public static void streamNotice(String headline, String detail) {
+      NoInvLeakModule module = active;
+      if (module != null) {
+         ModuleChat.send(module, ModuleChat.body().warn(headline).text(detail));
+      }
    }
 
    public static boolean opaqueCells() {

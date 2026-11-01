@@ -19,21 +19,19 @@ import net.anubis.client.module.HudOverlayProvider;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
-import net.anubis.client.util.StableTopK;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.world.debug.gizmo.GizmoDrawing;
-import net.minecraft.entity.EntityType;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.World;
-import net.minecraft.block.spawner.MobSpawnerEntry;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.block.entity.MobSpawnerBlockEntity;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.MobSpawnerBlockEntity;
+import net.minecraft.block.spawner.MobSpawnerEntry;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.EntityType;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
+import net.minecraft.world.debug.gizmo.GizmoDrawing;
 
 @Environment(EnvType.CLIENT)
 public final class SpawnerNametagsModule extends ClientModule implements HudOverlayProvider, ChunkScanner.Consumer {
@@ -45,12 +43,6 @@ public final class SpawnerNametagsModule extends ClientModule implements HudOver
    private static final double LABEL_HEIGHT = 1.2;
    private static final double FADE_SHARE = 0.125;
    private static final String SEPARATOR = "  ·  ";
-   private final StableTopK<SpawnerNametagsModule.Candidate> mobileCandidates = new StableTopK<>(
-      Comparator.comparingDouble(SpawnerNametagsModule.Candidate::distance)
-   );
-   private final List<SpawnerNametagsModule.Shown> mobileShown = new ArrayList<>(48);
-   private static final double[] RING_COS = new double[65];
-   private static final double[] RING_SIN = new double[65];
    private final NumberSetting sRange = this.addSetting("range", new NumberSetting("Range", 64.0F, 8.0F, 256.0F).step(1.0F));
    private final BooleanSetting sRadius = this.addSetting("activation-radius", new BooleanSetting("Activation Radius", true));
    private final LongOpenHashSet spawners = new LongOpenHashSet();
@@ -68,8 +60,6 @@ public final class SpawnerNametagsModule extends ClientModule implements HudOver
    protected void onDisable() {
       ChunkScanner.unregister(this);
       this.spawners.clear();
-      this.mobileShown.clear();
-      this.mobileCandidates.reset(0);
    }
 
    public static String mobName(MobSpawnerBlockEntity spawner) {
@@ -119,11 +109,6 @@ public final class SpawnerNametagsModule extends ClientModule implements HudOver
    }
 
    private List<SpawnerNametagsModule.Shown> inRange(MinecraftClient mc) {
-      if (MobilePerformance.active()) {
-         return this.mobileInRange(mc);
-      }
-
-      this.mobileShown.clear();
       List<SpawnerNametagsModule.Shown> shown = new ArrayList<>();
       if (!this.spawners.isEmpty() && mc.world != null && mc.player != null) {
          World level = mc.world;
@@ -145,52 +130,6 @@ public final class SpawnerNametagsModule extends ClientModule implements HudOver
          return shown.size() > 48 ? shown.subList(0, 48) : shown;
       } else {
          return shown;
-      }
-   }
-
-   private List<SpawnerNametagsModule.Shown> mobileInRange(MinecraftClient mc) {
-      this.mobileShown.clear();
-      this.mobileCandidates.reset(48);
-      if (!this.spawners.isEmpty() && mc.world != null && mc.player != null) {
-         Vec3d player = mc.player.getEntityPos();
-         double range = this.sRange.get();
-         double rangeSq = range * range;
-
-         try {
-            LongIterator it = this.spawners.iterator();
-
-            while (it.hasNext()) {
-               long packed = it.nextLong();
-               double distanceSq = player.squaredDistanceTo(
-                  BlockPos.unpackLongX(packed) + 0.5, BlockPos.unpackLongY(packed) + 0.5, BlockPos.unpackLongZ(packed) + 0.5
-               );
-               if (!(distanceSq > rangeSq)) {
-                  double distance = Math.sqrt(distanceSq);
-                  SpawnerNametagsModule.Candidate worst = this.mobileCandidates.worst();
-                  if (worst == null || Double.compare(distance, worst.distance()) < 0) {
-                     BlockPos pos = BlockPos.fromLong(packed);
-                     if (mc.world.getBlockEntity(pos) instanceof MobSpawnerBlockEntity spawner) {
-                        this.mobileCandidates.offer(new SpawnerNametagsModule.Candidate(pos, distance, distanceSq, spawner));
-                     }
-                  }
-               }
-            }
-
-            List<SpawnerNametagsModule.Candidate> nearest = this.mobileCandidates.result();
-            nearest.sort(Comparator.comparingDouble(SpawnerNametagsModule.Candidate::distance));
-
-            for (SpawnerNametagsModule.Candidate candidate : nearest) {
-               int activation = activationRange(candidate.spawner());
-               boolean inside = activation < 0 || candidate.distanceSq() < (double)activation * activation;
-               this.mobileShown.add(new SpawnerNametagsModule.Shown(candidate.pos(), candidate.distance(), mobName(candidate.spawner()), activation, inside));
-            }
-
-            return this.mobileShown;
-         } finally {
-            this.mobileCandidates.reset(0);
-         }
-      } else {
-         return this.mobileShown;
       }
    }
 
@@ -240,9 +179,7 @@ public final class SpawnerNametagsModule extends ClientModule implements HudOver
       }
 
       for (int corner = 0; corner < 4; corner++) {
-         float[] top = WorldLabel.project(
-            mc, new Vec3d(pos.getX() + (corner & 1), pos.getY() + 1.0, pos.getZ() + (corner >> 1)), screenW, screenH
-         );
+         float[] top = WorldLabel.project(mc, new Vec3d(pos.getX() + (corner & 1), pos.getY() + 1.0, pos.getZ() + (corner >> 1)), screenW, screenH);
          if (top != null) {
             anchor[1] = Math.min(anchor[1], top[1]);
          }
@@ -274,29 +211,16 @@ public final class SpawnerNametagsModule extends ClientModule implements HudOver
 
    private static void drawRing(Vec3d centre, double radius, int color) {
       Vec3d previous = null;
-      boolean mobile = MobilePerformance.active();
 
       for (int i = 0; i <= 64; i++) {
          double angle = (Math.PI * 2) * i / 64.0;
-         Vec3d point = centre.add((mobile ? RING_COS[i] : Math.cos(angle)) * radius, 0.0, (mobile ? RING_SIN[i] : Math.sin(angle)) * radius);
+         Vec3d point = centre.add(Math.cos(angle) * radius, 0.0, Math.sin(angle) * radius);
          if (previous != null) {
             GizmoDrawing.line(previous, point, color, 1.5F).ignoreOcclusion();
          }
 
          previous = point;
       }
-   }
-
-   static {
-      for (int i = 0; i <= 64; i++) {
-         double angle = (Math.PI * 2) * i / 64.0;
-         RING_COS[i] = Math.cos(angle);
-         RING_SIN[i] = Math.sin(angle);
-      }
-   }
-
-   @Environment(EnvType.CLIENT)
-   private record Candidate(BlockPos pos, double distance, double distanceSq, MobSpawnerBlockEntity spawner) {
    }
 
    @Environment(EnvType.CLIENT)

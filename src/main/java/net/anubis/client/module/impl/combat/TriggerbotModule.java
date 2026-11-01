@@ -6,6 +6,7 @@ import net.anubis.client.event.impl.TickEvent;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.CombatMacroLock;
 import net.anubis.client.module.ModuleCategory;
+import net.anubis.client.module.ModuleRegistry;
 import net.anubis.client.module.impl.combat.melee.MeleeAttacks;
 import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ModeSetting;
@@ -15,17 +16,18 @@ import net.anubis.client.util.pvp.Rotation;
 import net.anubis.client.util.pvp.ServerRotation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.component.type.PiercingWeaponComponent;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.AttackRangeComponent;
+import net.minecraft.component.type.PiercingWeaponComponent;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.util.hit.HitResult.Type;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.component.DataComponentTypes;
 
 @Environment(EnvType.CLIENT)
 public final class TriggerbotModule extends ClientModule {
@@ -85,6 +87,10 @@ public final class TriggerbotModule extends ClientModule {
       } else {
          this.trackCharge(player);
          EntityHitResult hit = MeleeAttacks.crosshairHit(mc);
+         if (this.holdAttack.get() && this.trackedId != -1 && mc.crosshairTarget != null && mc.crosshairTarget.getType() == Type.MISS) {
+            MeleeAttacks.takeAttackClicks(mc);
+         }
+
          if (hit != null && hit.getEntity() instanceof LivingEntity target && this.isTarget(player, target)) {
             if (target.getId() != this.trackedId) {
                this.trackedId = target.getId();
@@ -92,13 +98,15 @@ public final class TriggerbotModule extends ClientModule {
             }
 
             this.seenTick = this.ticks;
-            if (this.ticks >= this.reactionDoneTick && this.chargedTick >= 0 && this.ticks - this.chargedTick >= this.chargePause) {
+            MaceModule mace = ModuleRegistry.get(MaceModule.class);
+            boolean smash = mace != null && mace.smashReady(player, target);
+            if (this.ticks >= this.reactionDoneTick && (smash || this.chargedTick >= 0 && this.ticks - this.chargedTick >= this.chargePause)) {
                if (!this.holdAttack.get() || mc.options.attackKey.isPressed()) {
                   if (!this.weaponsOnly.get() || MeleeAttacks.isMeleeWeapon(player.getMainHandStack())) {
                      if (!CombatMacroLock.heldByOther(this) && !MeleeAttacks.wastedOnShield(player, target)) {
                         if (mc.attackCooldown <= 0 && !MeleeAttacks.clickPending(mc) && !MeleeAttacks.rightClickComing(mc) && !ServerRotation.pending()) {
                            boolean stabbing = player.getMainHandStack().contains(DataComponentTypes.PIERCING_WEAPON);
-                           if (stabbing || this.critsAllow(mc, player, target)) {
+                           if (stabbing || smash || this.critsAllow(mc, player, target)) {
                               if (stabbing) {
                                  hit = this.stabHit(player, target);
                                  if (hit == null) {
@@ -108,6 +116,10 @@ public final class TriggerbotModule extends ClientModule {
 
                               if (stabbing ? MeleeAttacks.stab(mc, hit) : MeleeAttacks.attack(mc, hit)) {
                                  this.chargedTick = -1;
+                                 if (smash) {
+                                    mace.noteSmash();
+                                 }
+
                                  MeleeAttacks.claimTick(mc);
                               }
                            }
@@ -145,7 +157,7 @@ public final class TriggerbotModule extends ClientModule {
       Vec3d start = eye.add(look.multiply(range.getEffectiveMinRange(player)));
       Vec3d end = eye.add(look.multiply(range.getEffectiveMaxRange(player) + Math.max(0.0, player.getMovement().dotProduct(look))));
       float margin = range.hitboxMargin();
-      Vec3d at = (Vec3d)target.getBoundingBox().expand(margin).raycast(eye, end).orElse(null);
+      Vec3d at = target.getBoundingBox().expand(margin).raycast(eye, end).orElse(null);
       if (at != null && MeleeAttacks.lineIsClear(player, eye, at)) {
          for (Entity entity : player.getEntityWorld().getOtherEntities(player, new Box(start, end).expand(1.0))) {
             if (entity != target && entity instanceof LivingEntity other && PiercingWeaponComponent.canHit(player, entity) && !this.isTarget(player, other)) {

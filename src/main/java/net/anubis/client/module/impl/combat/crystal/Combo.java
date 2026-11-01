@@ -5,21 +5,22 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.function.IntFunction;
 import net.anubis.client.module.impl.combat.melee.MeleeAttacks;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.entity.PositionInterpolator;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.PositionInterpolator;
+import net.minecraft.item.Items;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Direction.Type;
 
 @Environment(EnvType.CLIENT)
@@ -39,7 +40,13 @@ public final class Combo {
    private static final double AIR_DRAG = 0.98;
    private static final Combo.Kind[] SETUP = new Combo.Kind[]{Combo.Kind.CHARGE, Combo.Kind.CRYSTAL, Combo.Kind.OBSIDIAN, Combo.Kind.ANCHOR};
    private static final Map<LivingEntity, Combo.Track> TRACKS = new WeakHashMap<>();
+   private static final double PREFER_BONUS = 6.0;
    private static LivingEntity focus;
+   private static LivingEntity preferred;
+   private static int preferredUntil;
+   private static LivingEntity flying;
+   private static IntFunction<Vec3d> flight;
+   private static int flightUntil;
 
    private Combo() {
    }
@@ -53,11 +60,28 @@ public final class Combo {
          }
       }
 
+      LivingEntity chosen = player.age <= preferredUntil ? preferred : null;
       enemies.sort(
-         Comparator.comparingDouble(enemy -> player.distanceTo(enemy) - (enemy == focus ? 2.0 : 0.0) - (CrystalDamage.health(enemy) <= 10.0F ? 2.0 : 0.0))
+         Comparator.comparingDouble(
+            enemy -> player.distanceTo(enemy)
+               - (enemy == focus ? 2.0 : 0.0)
+               - (enemy == chosen ? 6.0 : 0.0)
+               - (CrystalDamage.health(enemy) <= 10.0F ? 2.0 : 0.0)
+         )
       );
       focus = enemies.isEmpty() ? null : enemies.get(0);
       return enemies.size() > 3 ? enemies.subList(0, 3) : enemies;
+   }
+
+   public static void prefer(ClientPlayerEntity player, LivingEntity enemy) {
+      preferred = enemy;
+      preferredUntil = player.age + 2;
+   }
+
+   public static void flight(ClientPlayerEntity player, LivingEntity enemy, IntFunction<Vec3d> guess) {
+      flying = enemy;
+      flight = guess;
+      flightUntil = player.age + 2;
    }
 
    public static List<LivingEntity> friends(MinecraftClient mc, ClientPlayerEntity player) {
@@ -85,9 +109,18 @@ public final class Combo {
          track.note(entity, server);
          velocity = track.velocity(entity);
          ahead += Math.min(track.age(entity), entity.getType().getTrackTickInterval());
+         Vec3d flown = flown(entity, ticks);
+         if (flown != null) {
+            return flown;
+         }
       }
 
       return ticks > 0 && !(velocity.horizontalLengthSquared() > 1.0) ? lag.add(travel(entity, server, velocity, ahead)) : lag;
+   }
+
+   private static Vec3d flown(LivingEntity entity, int ticks) {
+      ClientPlayerEntity self = MinecraftClient.getInstance().player;
+      return ticks > 0 && entity == flying && flight != null && self != null && self.age <= flightUntil ? flight.apply(ticks) : null;
    }
 
    private static Vec3d travel(LivingEntity entity, Vec3d from, Vec3d velocity, int ticks) {

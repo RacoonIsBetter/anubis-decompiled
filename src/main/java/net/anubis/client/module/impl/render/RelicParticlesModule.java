@@ -11,24 +11,23 @@ import net.anubis.client.module.setting.BooleanSetting;
 import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.ModeSetting;
 import net.anubis.client.module.setting.NumberSetting;
-import net.anubis.client.util.MobilePerformance;
 import net.anubis.client.util.combat.TotemPops;
 import net.anubis.client.util.glyph.GlyphCanvas;
 import net.anubis.client.util.glyph.GlyphSwarm;
 import net.anubis.client.util.glyph.GlyphTint;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.projectile.PersistentProjectileEntity;
-import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.entity.projectile.TridentEntity;
+import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.util.math.Box;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.random.Random;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.network.ClientPlayerEntity;
 
 @Environment(EnvType.CLIENT)
 public final class RelicParticlesModule extends ClientModule {
@@ -162,7 +161,7 @@ public final class RelicParticlesModule extends ClientModule {
          this.swarm.step(dt);
          if (this.swarm.count() != 0) {
             this.canvas.begin(mc.gameRenderer.getCamera());
-            this.swarm.draw(this.canvas, 1.0F, this.halo.get(), MobilePerformance.active() ? event.frustum : null);
+            this.swarm.draw(this.canvas, 1.0F, this.halo.get());
             this.canvas.submit(false);
          }
       }
@@ -174,7 +173,7 @@ public final class RelicParticlesModule extends ClientModule {
          if (entity != mc.player || this.ownPops.get()) {
             this.refreshPalette();
             Box box = entity.getBoundingBox();
-            int total = MobilePerformance.particles(this.popBurst.getInt(), 6);
+            int total = this.popBurst.getInt();
             String mode = this.popGlyph.get();
 
             for (int i = 0; i < total; i++) {
@@ -185,16 +184,14 @@ public final class RelicParticlesModule extends ClientModule {
                float heading = this.random.nextFloat() * (float) (Math.PI * 2);
                float out = outward(kind) * (0.45F + this.random.nextFloat());
                float up = upward(kind) * (0.55F + 0.8F * this.random.nextFloat());
-               this.emit(
-                  kind, px, py, pz, MathHelper.cos(heading) * out, up, MathHelper.sin(heading) * out, 1.0F, 1.0F, this.colorFor(kind, -1)
-               );
+               this.emit(kind, px, py, pz, MathHelper.cos(heading) * out, up, MathHelper.sin(heading) * out, 1.0F, 1.0F, this.colorFor(kind, -1));
             }
          }
       }
    }
 
    private void trails(ClientWorld level, ClientPlayerEntity player) {
-      int density = MobilePerformance.particles(this.trailDensity.getInt(), 1);
+      int density = this.trailDensity.getInt();
       String mode = this.trailGlyph.get();
 
       for (Entity entity : level.getEntities()) {
@@ -233,7 +230,7 @@ public final class RelicParticlesModule extends ClientModule {
          double dz = player.getZ() - player.lastZ;
          double speed = Math.sqrt(dx * dx + dz * dz);
          if (!(speed < 0.07)) {
-            int count = MobilePerformance.particles(this.stepDensity.getInt() + (player.isSprinting() ? 1 : 0), 1);
+            int count = this.stepDensity.getInt() + (player.isSprinting() ? 1 : 0);
             String mode = this.stepGlyph.get();
 
             for (int i = 0; i < count; i++) {
@@ -265,7 +262,7 @@ public final class RelicParticlesModule extends ClientModule {
    }
 
    private int particleLimit() {
-      return MobilePerformance.particles(this.limit.getInt(), 40);
+      return this.limit.getInt();
    }
 
    private void refreshPalette() {

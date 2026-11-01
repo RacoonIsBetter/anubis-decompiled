@@ -37,20 +37,6 @@ public interface Paint2D {
       };
    }
 
-   static Paint2D elliptic(float cx, float cy, float rx, float ry, int... stops) {
-      if (stops.length == 0) {
-         throw new IllegalArgumentException("gradient needs at least one colour");
-      }
-
-      float ix = 1.0F / Math.max(1.0E-4F, rx);
-      float iy = 1.0F / Math.max(1.0E-4F, ry);
-      return (x, y) -> {
-         float dx = (x - cx) * ix;
-         float dy = (y - cy) * iy;
-         return stop(stops, (float)Math.sqrt(dx * dx + dy * dy));
-      };
-   }
-
    static Paint2D noise(int a, int b, float size, float contrast) {
       float f = 1.0F / Math.max(0.001F, size);
       return (x, y) -> {

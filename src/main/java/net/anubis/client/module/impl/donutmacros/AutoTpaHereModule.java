@@ -32,25 +32,26 @@ import net.anubis.client.module.setting.NumberSetting;
 import net.anubis.client.module.setting.Setting;
 import net.anubis.client.module.setting.StringListSetting;
 import net.anubis.client.module.setting.StringSetting;
+import net.anubis.client.util.CompletionChannel;
 import net.anubis.client.util.pvp.Rotation;
 import net.anubis.client.util.pvp.RotationUtils;
 import net.anubis.client.util.pvp.ServerRotation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.DeathScreen;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.client.gui.screen.DeathScreen;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.registry.Registries;
 
 @Environment(EnvType.CLIENT)
 public final class AutoTpaHereModule extends ClientModule {
@@ -61,13 +62,13 @@ public final class AutoTpaHereModule extends ClientModule {
    private static final String SUB_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789_";
    private static final Pattern VALID_NAME = Pattern.compile("[A-Za-z0-9._]{1,32}");
    private static final Pattern FORMATTING = Pattern.compile("§.");
-   private static final Pattern RATE_LIMIT = Pattern.compile("you need to wait another ([\\d.]+) seconds? to execute a command");
+   private static final Pattern RATE_LIMIT = Pattern.compile("^you need to wait another ([\\d.]+) seconds? to execute a command");
    private static final Pattern NOT_ONLINE = Pattern.compile("(that|this) (user|player) is not online|player is not online");
    private static final Pattern SENT_REQUEST = Pattern.compile("^you sent (\\S+) (a )?teleport( here)? request");
    private static final int SUGGEST_CAP = 990;
    private static final long DETECT_TIMEOUT_MS = 5000L;
    private static final long LETTER_TIMEOUT_MS = 5000L;
-   private static final long LETTER_TIMEOUT_LOCAL_MS = 1500L;
+   private static final long LETTER_TIMEOUT_LOCAL_MS = 3000L;
    private static final long PREFIX_TIMEOUT_MS = 4000L;
    private static final int SPLIT_MAX_INFLIGHT = 6;
    private static final long PROBE_WAIT_MS = 700L;
@@ -320,9 +321,7 @@ public final class AutoTpaHereModule extends ClientModule {
 
    @EventHandler
    public void onPacket(PacketReceiveNettyEvent event) {
-      if (this.completions.ingest(event.packet)) {
-         event.setCancelled(true);
-      } else if (event.packet instanceof GameMessageS2CPacket chat && chat.content() != null && this.chatLines.size() < 256) {
+      if (event.packet instanceof GameMessageS2CPacket chat && chat.content() != null && this.chatLines.size() < 256) {
          this.chatLines.offer(chat.content().getString());
       }
    }
@@ -396,14 +395,14 @@ public final class AutoTpaHereModule extends ClientModule {
    private void stepDetect(long now) {
       String first = this.order.is("Random") ? "a" : this.letter;
       if (this.detectSlash < 0 && this.detectBare < 0) {
-         this.detectSlash = this.completions.fire(this.partialFor(first), CompletionRequests.Form.SLASH);
-         this.detectBare = this.completions.fire(this.partialFor(first), CompletionRequests.Form.BARE);
+         this.detectSlash = this.completions.fire(this.partialFor(first), CompletionChannel.Form.SLASH);
+         this.detectBare = this.completions.fire(this.partialFor(first), CompletionChannel.Form.BARE);
          this.detectUntil = now + 5000L;
       } else {
          if (this.completions.poll(this.detectSlash) != null) {
-            this.completions.form(CompletionRequests.Form.SLASH);
+            this.completions.form(CompletionChannel.Form.SLASH);
          } else if (this.completions.poll(this.detectBare) != null) {
-            this.completions.form(CompletionRequests.Form.BARE);
+            this.completions.form(CompletionChannel.Form.BARE);
          } else if (now < this.detectUntil) {
             return;
          }
@@ -637,6 +636,7 @@ public final class AutoTpaHereModule extends ClientModule {
       this.lastTargetAt = now;
       this.lastTargetCounted = false;
       connection.sendChatCommand(this.command.get() + " " + name);
+      this.teleportConfirm.sent();
       this.lastSendAt = now;
       this.totalSent++;
       if (joiner) {
@@ -842,7 +842,7 @@ public final class AutoTpaHereModule extends ClientModule {
                Matcher wait = RATE_LIMIT.matcher(low);
                if (wait.find()) {
                   try {
-                     this.rateHoldUntil = now + (long)Math.ceil(Double.parseDouble(wait.group(1)) * 1000.0) + 80L;
+                     this.rateHoldUntil = now + (long)Math.ceil(Math.min(30.0, Double.parseDouble(wait.group(1))) * 1000.0) + 80L;
                   } catch (NumberFormatException var7) {
                   }
 
@@ -1033,7 +1033,11 @@ public final class AutoTpaHereModule extends ClientModule {
    }
 
    private static boolean canFight(MinecraftClient mc, ClientPlayerEntity player) {
-      return mc.world != null && mc.interactionManager != null && !player.isSpectator() && player.currentScreenHandler == player.playerScreenHandler && !AutoEatModule.isEating();
+      return mc.world != null
+         && mc.interactionManager != null
+         && !player.isSpectator()
+         && player.currentScreenHandler == player.playerScreenHandler
+         && !AutoEatModule.isEating();
    }
 
    private static Vec3d hitPoint(ClientPlayerEntity player, Vec3d eye, Box box, Rotation look) {
@@ -1094,8 +1098,12 @@ public final class AutoTpaHereModule extends ClientModule {
    }
 
    private int findApple(PlayerInventory inventory) {
-      if (this.appleSlot.getInt() >= 1) {
-         return this.appleSlot.getInt() - 1;
+      int chosen = this.appleSlot.getInt() - 1;
+      if (chosen >= 0 && chosen < PlayerInventory.getHotbarSize()) {
+         ItemStack stack = inventory.getStack(chosen);
+         if (stack.isOf(Items.GOLDEN_APPLE) || stack.isOf(Items.ENCHANTED_GOLDEN_APPLE)) {
+            return chosen;
+         }
       }
 
       int normal = -1;
@@ -1495,7 +1503,7 @@ public final class AutoTpaHereModule extends ClientModule {
             this.split = AutoTpaHereModule.this.splitLetters.contains(this.letter);
             if (!this.split) {
                this.mainId = AutoTpaHereModule.this.completions.fire(AutoTpaHereModule.this.partialFor(this.letter));
-               this.mainUntil = now + (AutoTpaHereModule.this.localNames(connection, this.letter).isEmpty() ? 5000L : 1500L);
+               this.mainUntil = now + (AutoTpaHereModule.this.localNames(connection, this.letter).isEmpty() ? 5000L : 3000L);
                if (this.mainId < 0) {
                   this.timedOut = true;
                }

@@ -1,6 +1,7 @@
 package net.anubis.client.module.impl.client;
 
 import java.util.List;
+import net.anubis.client.gui.ThemeTint;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.setting.BooleanSetting;
@@ -129,7 +130,7 @@ public final class HudModule extends ClientModule {
    }
 
    public int accentArgb() {
-      return this.accentColor.argb();
+      return ThemeTint.accent(this.accentColor.argb());
    }
 
    public HudModule.ArmorWear armorWear() {
