@@ -29,9 +29,8 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
-import net.minecraft.world.chunk.ChunkSection;
-import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.gen.GeneratorOptions;
 
 /**
@@ -45,6 +44,7 @@ public final class SeedBlockEspModule extends ClientModule {
    private static final int SEED_SETTLE_TICKS = 20;
    private static final int REQUEST_EVERY_TICKS = 20;
    private static final int RECHECK_EVERY_TICKS = 40;
+   private static final int DEEPSLATE_SPLIT_Y = 4;
    /** Visible ores needed before the seed is judged; a wrong seed matches almost none, the right one most. */
    private static final int VERIFY_SAMPLES = 30;
    private static final float VERIFY_PASS = 0.5F;
@@ -54,6 +54,8 @@ public final class SeedBlockEspModule extends ClientModule {
    private final NumberSetting radius = this.addSetting("radius", new NumberSetting("Chunk Radius", 6.0F, 1.0F, 12.0F).step(1.0F));
    private final Map<SeedOres.Type, BooleanSetting> shown = new EnumMap<>(SeedOres.Type.class);
    private final Map<SeedOres.Type, ColorSetting> colors = new EnumMap<>(SeedOres.Type.class);
+   private final BooleanSetting stoneOres = this.addSetting("stone-ores", new BooleanSetting("Stone Ores", true));
+   private final BooleanSetting deepslateOres = this.addSetting("deepslate-ores", new BooleanSetting("Deepslate Ores", true));
    private final BooleanSetting uncertain = this.addSetting("uncertain", new BooleanSetting("Show Uncertain", true));
    private final BooleanSetting hideMissing = this.addSetting("hide-missing", new BooleanSetting("Hide Mined / Missing", true));
    private final BooleanSetting tracers = this.addSetting("tracers", new BooleanSetting("Tracers", false));
@@ -103,6 +105,8 @@ public final class SeedBlockEspModule extends ClientModule {
       }
 
       this.uncertain.onChange(this::redraw);
+      this.stoneOres.onChange(this::redraw);
+      this.deepslateOres.onChange(this::redraw);
       this.hideMissing.onChange(this::redraw);
    }
 
@@ -278,11 +282,11 @@ public final class SeedBlockEspModule extends ClientModule {
       }
 
       LongOpenHashSet keep = new LongOpenHashSet();
-      Long2ObjectOpenHashMap<Boolean> masked = new Long2ObjectOpenHashMap<>();
 
       for (List<SeedOres.Ore> ores : this.predicted.values()) {
          for (SeedOres.Ore ore : ores) {
-            if (this.shown.get(ore.type()).get() && (ore.certain() || this.uncertain.get()) && this.stillThere(level, ore, masked)) {
+            if (this.shown.get(ore.type()).get() && (ore.certain() || this.uncertain.get())
+               && (deepslate(level, ore) ? this.deepslateOres.get() : this.stoneOres.get()) && this.stillThere(level, ore)) {
                keep.add(ore.pos());
                this.layer.put(ore.pos(), new SeedBlockEspModule.Shown(ore.type(), ore.certain()));
             }
@@ -366,44 +370,54 @@ public final class SeedBlockEspModule extends ClientModule {
    }
 
    /**
-    * Unloaded or still hidden by anti-xray (a section of nothing but deepslate): trust the seed.
-    * Visible: keep it only if the ore is really there, so mined ores and wrong guesses drop out.
+    * Trust the seed unless the world clearly says otherwise. Ore anti-xray keeps showing buried ores
+    * as stone or deepslate even in revealed chunks, so a buried non-ore proves nothing; only air
+    * (mined out, or a cave the seed model lacks) or an exposed block that still isn't the ore
+    * (anti-xray has to show exposed ores) drops a prediction.
     */
-   private boolean stillThere(ClientWorld level, SeedOres.Ore ore, Long2ObjectOpenHashMap<Boolean> masked) {
+   private boolean stillThere(ClientWorld level, SeedOres.Ore ore) {
       if (!this.hideMissing.get()) {
          return true;
       }
 
       BlockPos pos = BlockPos.fromLong(ore.pos());
-      int cx = pos.getX() >> 4;
-      int cz = pos.getZ() >> 4;
-      if (!LevelUtil.isLoaded(level, cx, cz)) {
+      if (!LevelUtil.isLoaded(level, pos.getX() >> 4, pos.getZ() >> 4)) {
          return true;
       }
 
-      WorldChunk chunk = level.getChunkManager().getWorldChunk(cx, cz);
-      if (chunk == null) {
-         return true;
-      }
-
-      BlockState state = chunk.getBlockState(pos);
+      BlockState state = level.getBlockState(pos);
       if (SeedBlockEspModule.Look.of(ore.type()).matches(state.getBlock())) {
          return true;
       }
 
-      if (!state.isOf(Blocks.DEEPSLATE) || pos.getY() >= 0) {
-         return false;
+      return !state.isAir() && !exposed(level, pos);
+   }
+
+   private static boolean exposed(ClientWorld level, BlockPos pos) {
+      BlockPos.Mutable next = new BlockPos.Mutable();
+
+      for (Direction side : Direction.values()) {
+         if (level.getBlockState(next.set(pos, side)).isAir()) {
+            return true;
+         }
       }
 
-      long sectionKey = BlockPos.asLong(cx, pos.getY() >> 4, cz);
-      Boolean hidden = masked.get(sectionKey);
-      if (hidden == null) {
-         ChunkSection section = chunk.getSection(chunk.getSectionIndex(pos.getY()));
-         hidden = section != null && !section.hasAny(s -> !s.isAir() && !s.isOf(Blocks.DEEPSLATE));
-         masked.put(sectionKey, hidden);
+      return false;
+   }
+
+   /**
+    * Deepslate or stone variant: what the client shows when it is the ore, else by height (all
+    * deepslate below Y=0, all stone from Y=8, split halfway through the blend in between).
+    */
+   private static boolean deepslate(ClientWorld level, SeedOres.Ore ore) {
+      BlockPos pos = BlockPos.fromLong(ore.pos());
+      Block shown = level.getBlockState(pos).getBlock();
+      SeedBlockEspModule.Look look = SeedBlockEspModule.Look.of(ore.type());
+      if (look.matches(shown)) {
+         return shown == look.deepslate;
       }
 
-      return hidden;
+      return pos.getY() < DEEPSLATE_SPLIT_Y;
    }
 
    @EventHandler
@@ -433,7 +447,7 @@ public final class SeedBlockEspModule extends ClientModule {
       final String label;
       final int color;
       private final Block stone;
-      private final Block deepslate;
+      final Block deepslate;
 
       Look(String label, int color, Block stone, Block deepslate) {
          this.label = label;

@@ -105,9 +105,11 @@ ChunkVeil):
   nothing from the server, so it works under the fake deepslate. The seed is checked against the
   world: predicted ores that touch air are real blocks anti-xray leaves alone, so it reports
   "Seed confirmed" (26 of 30 with the right seed in testing) or "Seed looks wrong" (0 of 31 with a
-  wrong one). The seed hash the server sends at login is only a hint, since servers can fake it. Once the real
-  blocks are visible, mined ores and predictions the seed model got wrong (it doesn't model
-  carver caves) are hidden; *Show Uncertain* adds the dimmer guesses. In a test world 92% of
+  wrong one). The seed hash the server sends at login is only a hint, since servers can fake it.
+  *Stone Ores* / *Deepslate Ores* filter by variant (the real block when visible, otherwise by
+  height). A prediction only disappears when its block is air (mined, or a cave) or exposed and
+  still not the ore; buried blocks that ore anti-xray shows as stone or deepslate stay shown. *Show Uncertain* adds
+  the dimmer guesses. In a test world 92% of
   "certain" predictions (46 of 48 diamonds) were the real ore.
 - **Sound Detector** (Base Finding): marks sounds heard with no visible player within 6 blocks,
   i.e. someone working out of sight: containers (chests, barrels, shulkers, ender chests,
