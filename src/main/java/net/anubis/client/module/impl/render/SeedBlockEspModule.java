@@ -15,6 +15,7 @@ import net.anubis.client.event.impl.TickEvent;
 import net.anubis.client.module.ClientModule;
 import net.anubis.client.module.ModuleCategory;
 import net.anubis.client.module.setting.BooleanSetting;
+import net.anubis.client.module.setting.ColorSetting;
 import net.anubis.client.module.setting.NumberSetting;
 import net.anubis.client.module.setting.StringSetting;
 import net.anubis.client.util.LevelUtil;
@@ -44,10 +45,15 @@ public final class SeedBlockEspModule extends ClientModule {
    private static final int SEED_SETTLE_TICKS = 20;
    private static final int REQUEST_EVERY_TICKS = 20;
    private static final int RECHECK_EVERY_TICKS = 40;
+   /** Visible ores needed before the seed is judged; a wrong seed matches almost none, the right one most. */
+   private static final int VERIFY_SAMPLES = 30;
+   private static final float VERIFY_PASS = 0.5F;
+   private static final float VERIFY_FAIL = 0.2F;
 
    private final StringSetting seed = this.addSetting("seed", new StringSetting("Seed", "").hint("World seed"));
    private final NumberSetting radius = this.addSetting("radius", new NumberSetting("Chunk Radius", 6.0F, 1.0F, 12.0F).step(1.0F));
    private final Map<SeedOres.Type, BooleanSetting> shown = new EnumMap<>(SeedOres.Type.class);
+   private final Map<SeedOres.Type, ColorSetting> colors = new EnumMap<>(SeedOres.Type.class);
    private final BooleanSetting uncertain = this.addSetting("uncertain", new BooleanSetting("Show Uncertain", true));
    private final BooleanSetting hideMissing = this.addSetting("hide-missing", new BooleanSetting("Hide Mined / Missing", true));
    private final BooleanSetting tracers = this.addSetting("tracers", new BooleanSetting("Tracers", false));
@@ -56,7 +62,8 @@ public final class SeedBlockEspModule extends ClientModule {
       @Override
       public int color(Object kind) {
          SeedBlockEspModule.Shown shown = (SeedBlockEspModule.Shown)kind;
-         return shown.certain() ? shown.type().color : shown.type().color & 0x00FFFFFF | 0x70000000;
+         int color = SeedBlockEspModule.this.colors.get(shown.ore()).argb();
+         return shown.certain() ? color : color & 0x00FFFFFF | 0x70000000;
       }
 
       @Override
@@ -73,6 +80,9 @@ public final class SeedBlockEspModule extends ClientModule {
    private int seedStill;
    private boolean seedAsked;
    private boolean seedChecked;
+   private boolean hashMismatch;
+   /** 1 confirmed by visible ores, -1 rejected, 0 not decided yet. */
+   private int verdict;
    private int ticks;
 
    public SeedBlockEspModule() {
@@ -81,9 +91,15 @@ public final class SeedBlockEspModule extends ClientModule {
 
       for (SeedOres.Type type : SeedOres.Type.values()) {
          boolean on = type == SeedOres.Type.DIAMOND || type == SeedOres.Type.EMERALD || type == SeedOres.Type.GOLD || type == SeedOres.Type.REDSTONE;
-         BooleanSetting setting = this.addSetting(type.name().toLowerCase(), new BooleanSetting(SeedBlockEspModule.Look.of(type).label, on));
+         SeedBlockEspModule.Look look = SeedBlockEspModule.Look.of(type);
+         BooleanSetting setting = this.addSetting(type.name().toLowerCase(), new BooleanSetting(look.label, on));
+         ColorSetting color = this.addSetting(type.name().toLowerCase() + "-color", new ColorSetting(look.label + " Colour", look.color));
          setting.onChange(this::redraw);
+         color.visibleWhen(setting::get);
+         // Boxes keep the colour they were built with; rebuild them all.
+         color.onChange(this::recolor);
          this.shown.put(type, setting);
+         this.colors.put(type, color);
       }
 
       this.uncertain.onChange(this::redraw);
@@ -113,6 +129,8 @@ public final class SeedBlockEspModule extends ClientModule {
       this.layer.clear();
       this.lastLevel = level;
       this.seedChecked = false;
+      this.hashMismatch = false;
+      this.verdict = 0;
    }
 
    @EventHandler
@@ -145,6 +163,9 @@ public final class SeedBlockEspModule extends ClientModule {
 
       if (fresh || this.ticks % RECHECK_EVERY_TICKS == 0) {
          this.redraw();
+         if (this.verdict == 0) {
+            this.verify(level);
+         }
       }
    }
 
@@ -184,8 +205,10 @@ public final class SeedBlockEspModule extends ClientModule {
       if (!this.seedChecked) {
          this.seedChecked = true;
          OptionalLong hashed = SeedOres.hashedSeed(level);
-         if (hashed.isPresent() && !SeedOres.matches(wanted.getAsLong(), hashed.getAsLong())) {
-            ModuleChat.send(this, ModuleChat.body().warn("This seed does not match the world").text(": the ores shown will be wrong."));
+         // Only a hint: servers can send a fake hash to stop seed cracking. The visible ores decide.
+         this.hashMismatch = hashed.isPresent() && !SeedOres.matches(wanted.getAsLong(), hashed.getAsLong());
+         if (this.hashMismatch) {
+            ModuleChat.send(this, ModuleChat.body().text("The server's seed hash doesn't match this seed (some servers send a fake one); checking it against ores you can see..."));
          }
       }
 
@@ -241,6 +264,12 @@ public final class SeedBlockEspModule extends ClientModule {
       }
    }
 
+   private void recolor() {
+      this.layer.clear();
+      this.drawn.clear();
+      this.redraw();
+   }
+
    /** Puts every prediction that passes the settings and the visible-block check into the layer. */
    private void redraw() {
       ClientWorld level = MinecraftClient.getInstance().world;
@@ -255,7 +284,7 @@ public final class SeedBlockEspModule extends ClientModule {
          for (SeedOres.Ore ore : ores) {
             if (this.shown.get(ore.type()).get() && (ore.certain() || this.uncertain.get()) && this.stillThere(level, ore, masked)) {
                keep.add(ore.pos());
-               this.layer.put(ore.pos(), new SeedBlockEspModule.Shown(SeedBlockEspModule.Look.of(ore.type()), ore.certain()));
+               this.layer.put(ore.pos(), new SeedBlockEspModule.Shown(ore.type(), ore.certain()));
             }
          }
       }
@@ -271,6 +300,69 @@ public final class SeedBlockEspModule extends ClientModule {
       }
 
       this.drawn.addAll(keep);
+   }
+
+   /**
+    * Judges the seed by the world itself: predicted ores that touch air are real blocks anti-xray
+    * leaves alone (it only hides buried ores). With the right seed most are there, with a wrong one
+    * almost none are.
+    */
+   private void verify(ClientWorld level) {
+      int seen = 0;
+      int there = 0;
+      BlockPos.Mutable next = new BlockPos.Mutable();
+
+      for (List<SeedOres.Ore> ores : this.predicted.values()) {
+         for (SeedOres.Ore ore : ores) {
+            if (!ore.certain()) {
+               continue;
+            }
+
+            BlockPos pos = BlockPos.fromLong(ore.pos());
+            if (!LevelUtil.isLoaded(level, pos.getX() >> 4, pos.getZ() >> 4)) {
+               continue;
+            }
+
+            BlockState state = level.getBlockState(pos);
+            if (state.isAir() || state.isOf(Blocks.DEEPSLATE) && pos.getY() < 0) {
+               continue;
+            }
+
+            boolean exposed = false;
+
+            for (net.minecraft.util.math.Direction side : net.minecraft.util.math.Direction.values()) {
+               if (level.getBlockState(next.set(pos, side)).isAir()) {
+                  exposed = true;
+                  break;
+               }
+            }
+
+            if (exposed) {
+               seen++;
+               if (SeedBlockEspModule.Look.of(ore.type()).matches(state.getBlock())) {
+                  there++;
+               }
+            }
+         }
+      }
+
+      if (seen < VERIFY_SAMPLES) {
+         return;
+      }
+
+      float ratio = (float)there / seen;
+      if (ratio >= VERIFY_PASS) {
+         this.verdict = 1;
+         ModuleChat.Body body = ModuleChat.body().good("Seed confirmed").text(": " + there + " of " + seen + " ores you can see are where it puts them.");
+         if (this.hashMismatch) {
+            body.text(" The server sends a fake seed hash.");
+         }
+
+         ModuleChat.send(this, body);
+      } else if (ratio <= VERIFY_FAIL) {
+         this.verdict = -1;
+         ModuleChat.send(this, ModuleChat.body().warn("Seed looks wrong").text(": only " + there + " of " + seen + " ores you can see are where it puts them."));
+      }
    }
 
    /**
@@ -323,10 +415,10 @@ public final class SeedBlockEspModule extends ClientModule {
    }
 
    @Environment(EnvType.CLIENT)
-   private record Shown(SeedBlockEspModule.Look type, boolean certain) {
+   private record Shown(SeedOres.Type ore, boolean certain) {
    }
 
-   /** Colour, setting label and the real blocks of each ore (stone and deepslate variants). */
+   /** Default colour, setting label and the real blocks of each ore: both the stone and the deepslate variant count. */
    @Environment(EnvType.CLIENT)
    private enum Look {
       DIAMOND("Diamond", 0xFF35E8F0, Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE),

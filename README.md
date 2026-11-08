@@ -101,8 +101,11 @@ ChunkVeil):
 - **Seed Block ESP** (Render): seeded xray. Give it the world seed and it works out where the
   overworld ores (diamond, emerald, gold, redstone, lapis, iron, copper, coal) were generated,
   using Anubis's own ore simulation (`util/seedscan`), and boxes them with the Block ESP
-  renderer. It needs nothing from the server, so it works under the fake deepslate. It checks
-  the seed against the hashed seed the server sends and warns when they differ. Once the real
+  renderer, stone and deepslate variants alike, each ore in its own colour (changeable). It needs
+  nothing from the server, so it works under the fake deepslate. The seed is checked against the
+  world: predicted ores that touch air are real blocks anti-xray leaves alone, so it reports
+  "Seed confirmed" (26 of 30 with the right seed in testing) or "Seed looks wrong" (0 of 31 with a
+  wrong one). The seed hash the server sends at login is only a hint, since servers can fake it. Once the real
   blocks are visible, mined ores and predictions the seed model got wrong (it doesn't model
   carver caves) are hidden; *Show Uncertain* adds the dimmer guesses. In a test world 92% of
   "certain" predictions (46 of 48 diamonds) were the real ore.
