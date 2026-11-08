@@ -1,5 +1,6 @@
 package net.anubis.client.basefinder;
 
+import java.util.Set;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.block.Block;
@@ -34,9 +35,10 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
    public enum Kind {
       CONTAINER("Container", 0xFFFFB238),
       WORKSTATION("Workstation", 0xFFB070FF),
-      DOOR("Door", 0xFF78C8FF),
+      DOOR("Doors / Switches", 0xFF78C8FF),
       MINING("Mining", 0xFFFF6A50),
-      BUILDING("Building", 0xFF6AE070);
+      BUILDING("Building", 0xFF6AE070),
+      PLAYER("Player", 0xFFFF4D9A);
 
       public final String label;
       public final int color;
@@ -63,14 +65,19 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
    }
 
    private static HeardSound fromSound(SoundEvent sound, SoundCategory category, Vec3d pos) {
+      Identifier id = sound.id();
+      String path = id.getPath();
+      // Things only players throw or launch; the game files these under neutral or ambient sounds.
+      if (THROWN.contains(path)) {
+         return new HeardSound(pos, HeardSound.Kind.PLAYER, readable(path));
+      }
+
       if (category != SoundCategory.BLOCKS && category != SoundCategory.PLAYERS) {
          return null;
       }
 
-      Identifier id = sound.id();
-      String path = id.getPath();
       if (path.startsWith("block.chest.") || path.startsWith("block.barrel.") || path.startsWith("block.ender_chest.") || path.startsWith("block.shulker_box.")
-         || path.startsWith("block.trapped_chest.")) {
+         || path.startsWith("block.trapped_chest.") || path.startsWith("block.chiseled_bookshelf.") || path.startsWith("block.decorated_pot.insert")) {
          return new HeardSound(pos, HeardSound.Kind.CONTAINER, path.substring(6).replace('_', ' ').replace('.', ' '));
       }
 
@@ -79,7 +86,7 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
          return new HeardSound(pos, HeardSound.Kind.WORKSTATION, path.substring(6).replace('_', ' ').replace('.', ' '));
       }
 
-      if (path.contains("door.") || path.contains("trapdoor.") || path.contains("fence_gate.")) {
+      if (path.contains("door.") || path.contains("trapdoor.") || path.contains("fence_gate.") || path.startsWith("block.lever.") || path.contains("_button.click")) {
          return new HeardSound(pos, HeardSound.Kind.DOOR, path.substring(path.indexOf('.') + 1).replace('_', ' ').replace('.', ' '));
       }
 
@@ -92,7 +99,24 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
          }
       }
 
+      // Everything else the game files under player sounds: hits, eating, drinking, level-ups,
+      // armour, pickups, buckets, bows, crossbows, tridents, shields.
+      if (category == SoundCategory.PLAYERS) {
+         return new HeardSound(pos, HeardSound.Kind.PLAYER, readable(path));
+      }
+
       return null;
+   }
+
+   private static final Set<String> THROWN = Set.of(
+      "entity.ender_pearl.throw", "entity.splash_potion.throw", "entity.lingering_potion.throw", "entity.experience_bottle.throw",
+      "entity.firework_rocket.launch", "entity.fishing_bobber.throw", "entity.snowball.throw", "entity.egg.throw", "entity.wind_charge.throw"
+   );
+
+   /** {@code entity.player.attack.strong} becomes "player attack strong". */
+   private static String readable(String path) {
+      String text = path.startsWith("entity.") || path.startsWith("block.") ? path.substring(path.indexOf('.') + 1) : path;
+      return text.replace('_', ' ').replace('.', ' ');
    }
 
    /** Blocks that break by themselves: fluids, plants, leaves, snow, ice, fire, and grass sheep eat. */

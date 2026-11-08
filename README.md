@@ -106,9 +106,14 @@ ChunkVeil):
   blocks are visible, mined ores and predictions the seed model got wrong (it doesn't model
   carver caves) are hidden; *Show Uncertain* adds the dimmer guesses. In a test world 92% of
   "certain" predictions (46 of 48 diamonds) were the real ore.
-- **Sound Detector** (Base Finding): marks chests, barrels, shulkers, workstations (anvil,
-  enchanting, brewing...), doors, mining and building that were heard with no visible player
-  within 6 blocks: someone working out of sight. Base Finder uses the same sounds as hidden-player
+- **Sound Detector** (Base Finding): marks sounds heard with no visible player within 6 blocks,
+  i.e. someone working out of sight: containers (chests, barrels, shulkers, ender chests,
+  chiseled bookshelves, decorated pots), workstations (anvil, enchanting, grindstone, smithing,
+  brewing, crafter, respawn anchor, beacon), doors, trapdoors, fence gates, levers and buttons,
+  mining and block placing, and players themselves (hits, eating, drinking, level-ups, armour,
+  pickups, buckets, bows, and thrown pearls, potions, XP bottles and fireworks). Mob, ambient and
+  water sounds are ignored, and so are furnace crackles and note blocks (clients make the first
+  themselves; the second is usually redstone). Base Finder uses the same sounds as hidden-player
   evidence. Anti-xray plugins can cancel these sounds inside their hidden zone (ChunkVeil does by
   default), so it catches activity above or outside the masked layer.
 
