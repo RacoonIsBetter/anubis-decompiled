@@ -1,5 +1,6 @@
 package net.anubis.client.basefinder;
 
+import java.util.List;
 import java.util.Set;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -8,6 +9,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.passive.CopperGolemEntity;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket;
 import net.minecraft.network.packet.s2c.play.WorldEventS2CPacket;
@@ -17,6 +19,7 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.WorldEvents;
 
@@ -30,6 +33,8 @@ import net.minecraft.world.WorldEvents;
 public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
    /** Players and their pets are this close to the sound when it is just them being heard. */
    public static final double SEEN_RADIUS = 6.0;
+   /** Copper golems reach chests within a couple of blocks; this is their sorting range plus margin. */
+   private static final double GOLEM_RADIUS = 4.0;
 
    @Environment(EnvType.CLIENT)
    public enum Kind {
@@ -38,7 +43,9 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
       DOOR("Doors / Switches", 0xFF78C8FF),
       MINING("Mining", 0xFFFF6A50),
       BUILDING("Building", 0xFF6AE070),
-      PLAYER("Player", 0xFFFF4D9A);
+      PLAYER("Player", 0xFFFF4D9A),
+      /** Running redstone: pistons, dispensers, crafters, bulbs, minecarts. Always player-built, so a base is near. */
+      MACHINERY("Base activity", 0xFF3FD8C4);
 
       public final String label;
       public final int color;
@@ -61,7 +68,16 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
          }
       }
 
-      return heard != null && !seen(level, heard.pos) ? heard : null;
+      if (heard == null || seen(level, heard.pos)) {
+         return null;
+      }
+
+      // Copper golems open chests and copper chests on their own to sort items.
+      if (heard.kind == HeardSound.Kind.CONTAINER && golemNear(level, heard.pos)) {
+         return null;
+      }
+
+      return heard;
    }
 
    private static HeardSound fromSound(SoundEvent sound, SoundCategory category, Vec3d pos) {
@@ -72,17 +88,21 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
          return new HeardSound(pos, HeardSound.Kind.PLAYER, readable(path));
       }
 
+      if (MACHINERY.stream().anyMatch(path::startsWith)) {
+         return new HeardSound(pos, HeardSound.Kind.MACHINERY, readable(path));
+      }
+
       if (category != SoundCategory.BLOCKS && category != SoundCategory.PLAYERS) {
          return null;
       }
 
-      if (path.startsWith("block.chest.") || path.startsWith("block.barrel.") || path.startsWith("block.ender_chest.") || path.startsWith("block.shulker_box.")
+      if (path.startsWith("block.chest.") || path.startsWith("block.copper_chest") || path.startsWith("block.barrel.") || path.startsWith("block.ender_chest.") || path.startsWith("block.shulker_box.")
          || path.startsWith("block.trapped_chest.") || path.startsWith("block.chiseled_bookshelf.") || path.startsWith("block.decorated_pot.insert")) {
          return new HeardSound(pos, HeardSound.Kind.CONTAINER, path.substring(6).replace('_', ' ').replace('.', ' '));
       }
 
       if (path.startsWith("block.anvil.use") || path.startsWith("block.enchantment_table.") || path.startsWith("block.grindstone.") || path.startsWith("block.smithing_table.")
-         || path.startsWith("block.brewing_stand.") || path.startsWith("block.crafter.") || path.startsWith("block.respawn_anchor.") || path.startsWith("block.beacon.")) {
+         || path.startsWith("block.brewing_stand.") || path.startsWith("block.respawn_anchor.") || path.startsWith("block.beacon.")) {
          return new HeardSound(pos, HeardSound.Kind.WORKSTATION, path.substring(6).replace('_', ' ').replace('.', ' '));
       }
 
@@ -95,7 +115,9 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
          // Plants, crops and gravel land or grow on their own; everything else was placed by someone.
          if (!block.contains("grass") && !block.contains("crop") && !block.contains("sapling") && !block.contains("gravel") && !block.contains("sand")
             && !block.contains("pointed_dripstone") && !block.contains("amethyst") && !block.contains("cave_vines") && !block.contains("sculk")) {
-            return new HeardSound(pos, HeardSound.Kind.BUILDING, "placing " + block.replace('_', ' '));
+            // Place sounds belong to a sound family shared by many blocks (stone, wood, metal...),
+            // so the sound names the family, not the exact block.
+            return new HeardSound(pos, HeardSound.Kind.BUILDING, "placing a " + block.replace('_', ' ') + "-sounding block");
          }
       }
 
@@ -107,6 +129,12 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
 
       return null;
    }
+
+   /** Sound id prefixes of running machinery; minecarts and TNT are filed under neutral/block sounds. */
+   private static final List<String> MACHINERY = List.of(
+      "block.piston.", "block.dispenser.", "block.crafter.", "block.copper_bulb.turn_", "block.redstone_torch.burnout", "block.comparator.click",
+      "block.tripwire.click_", "block.note_block.", "entity.minecart.riding", "entity.minecart.inside", "entity.tnt.primed"
+   );
 
    private static final Set<String> THROWN = Set.of(
       "entity.ender_pearl.throw", "entity.splash_potion.throw", "entity.lingering_potion.throw", "entity.experience_bottle.throw",
@@ -124,6 +152,10 @@ public record HeardSound(Vec3d pos, HeardSound.Kind kind, String what) {
       return state.isAir() || state.isOf(Blocks.GRASS_BLOCK) || !state.getFluidState().isEmpty() || state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.FLOWERS) || state.isIn(BlockTags.REPLACEABLE)
          || state.isIn(BlockTags.CROPS) || state.isIn(BlockTags.SAPLINGS) || state.isIn(BlockTags.ICE) || state.isIn(BlockTags.SNOW) || state.isIn(BlockTags.FIRE)
          || state.isIn(BlockTags.CAVE_VINES);
+   }
+
+   private static boolean golemNear(ClientWorld level, Vec3d pos) {
+      return !level.getEntitiesByClass(CopperGolemEntity.class, new Box(pos, pos).expand(GOLEM_RADIUS), golem -> true).isEmpty();
    }
 
    /** Anyone we can see (us included) close enough to have made the sound. */

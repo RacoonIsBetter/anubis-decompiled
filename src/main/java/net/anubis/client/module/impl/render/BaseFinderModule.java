@@ -166,6 +166,8 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    private final ServerBlockLight serverLight = new ServerBlockLight();
    private Long2ObjectOpenHashMap<EntityEvidence> entityEvidence = new Long2ObjectOpenHashMap<>();
    private final Long2ObjectOpenHashMap<Digging> digging = new Long2ObjectOpenHashMap<>();
+   /** Machinery sounds heard per chunk (pistons, dispensers, crafters...): count and last time. */
+   private final Long2ObjectOpenHashMap<Digging> machinery = new Long2ObjectOpenHashMap<>();
    private final LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
    private final LongOpenHashSet queued = new LongOpenHashSet();
    private final Long2IntOpenHashMap dirtyAt = new Long2IntOpenHashMap();
@@ -214,6 +216,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       this.masked.clear();
       this.serverLight.clear();
       this.digging.clear();
+      this.machinery.clear();
       this.entityEvidence = new Long2ObjectOpenHashMap<>();
       this.queue.clear();
       this.queued.clear();
@@ -285,8 +288,11 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    /** The server tells nearby players who is breaking a block; a breaker you have no entity for is hidden from you. */
    @EventHandler
    public void onPacketReceive(PacketReceiveEvent event) {
-      if (this.scanning && this.watchingHidden()) {
+      if (this.scanning) {
          this.heard(event);
+      }
+
+      if (this.scanning && this.watchingHidden()) {
          if (event.packet instanceof BlockBreakingProgressS2CPacket progress) {
             this.pendingBreakers.add(progress.getPos().asLong());
             this.pendingBreakers.add(progress.getEntityId());
@@ -309,6 +315,24 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       }
 
       long pos = heard.blockPos().asLong();
+      if (heard.kind() == HeardSound.Kind.MACHINERY) {
+         // Running redstone is player-built whoever is around; it counts as base evidence, not a player.
+         if (this.scanBlocks.get()) {
+            long key = ChunkPos.toLong(heard.blockPos().getX() >> 4, heard.blockPos().getZ() >> 4);
+            BaseFinderModule.Digging was = this.machinery.get(key);
+            long now = System.currentTimeMillis();
+            long memory = (long)(this.playerMemory.get() * 1000.0F);
+            this.machinery.put(key, new BaseFinderModule.Digging(was == null || now - was.lastAt() > memory ? 1 : was.count() + 1, now));
+            this.rankDirty = true;
+         }
+
+         return;
+      }
+
+      if (!this.watchingHidden()) {
+         return;
+      }
+
       if (heard.kind() == HeardSound.Kind.MINING || heard.kind() == HeardSound.Kind.BUILDING) {
          // The block update for the same block may already be counted.
          if (!this.pendingChanges.contains(pos)) {
@@ -877,6 +901,9 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       keys.addAll(this.sightings.keySet());
       keys.addAll(this.hidden.keySet());
       keys.addAll(this.entityEvidence.keySet());
+      long memoryMs = (long)(this.playerMemory.get() * 1000.0F);
+      this.machinery.values().removeIf(m -> now - m.lastAt() > memoryMs);
+      keys.addAll(this.machinery.keySet());
       List<BaseFinderEntry> out = new ArrayList<>();
       var it = keys.iterator();
 
@@ -904,6 +931,11 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
             .put(Signal.HIDDEN_PLAYER, this.hiddenStrength(hiddenHere, now), hiddenHere == null ? null : hiddenHere.detail());
          if (entities != null) {
             entities.into(live);
+         }
+
+         BaseFinderModule.Digging running = this.machinery.get(key);
+         if (running != null) {
+            live.put(Signal.MACHINERY, Signal.MACHINERY.strengthFor(running.count()), running.count() + (running.count() == 1 ? " sound" : " sounds"));
          }
 
          float p = report.probability(groups, live);

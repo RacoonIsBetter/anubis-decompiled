@@ -101,7 +101,7 @@ public final class ChunkReport {
       }
 
       return switch (signal) {
-         case PLAYER, HIDDEN_PLAYER, PETS, ANIMAL_FARM, PLACED_ENTITIES -> signal.label;
+         case PLAYER, HIDDEN_PLAYER, PETS, ANIMAL_FARM, PLACED_ENTITIES, MACHINERY -> signal.label;
          case AMETHYST, KELP -> signal.label + " (" + count + "% grown)";
          case TUNNEL, SHAFT, DRIPSTONE -> signal.label + (count > 1 ? " x" + count : "");
          case SURFACE_BUILD -> signal.label + " (" + count + " blocks)";

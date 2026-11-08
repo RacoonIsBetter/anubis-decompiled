@@ -166,20 +166,25 @@ public final class VanillaOreGenerator implements AutoCloseable {
       }
    }
 
-   /** Every block in the FULL-generated chunk that {@code wanted} accepts, with its exact state. */
-   public List<VanillaOreGenerator.Found> predict(int chunkX, int chunkZ, Predicate<BlockState> wanted) {
+   /** Every block in the FULL-generated chunk of {@code dimension} that {@code wanted} accepts, with its exact state. */
+   public List<VanillaOreGenerator.Found> predict(RegistryKey<World> dimension, int chunkX, int chunkZ, Predicate<BlockState> wanted) {
       this.checkOwner();
       if (this.closed) {
          throw new IllegalStateException("Generator is closed");
       }
 
-      Chunk chunk = this.server.getOverworld().getChunk(chunkX, chunkZ);
+      ServerWorld world = this.server.getWorld(dimension);
+      if (world == null) {
+         throw new IllegalArgumentException("No generator for " + dimension.getValue());
+      }
+
+      Chunk chunk = world.getChunk(chunkX, chunkZ);
       List<VanillaOreGenerator.Found> result = find(chunk, wanted);
       // Expire request tickets so vanilla releases chunks. No mobs, blocks or players are ticked.
       if (++this.requests % 8 == 0) {
-         this.server.getOverworld().getChunkManager().tick(() -> true, false);
+         world.getChunkManager().tick(() -> true, false);
 
-         while (this.server.getOverworld().getChunkManager().executeQueuedTasks()) {
+         while (world.getChunkManager().executeQueuedTasks()) {
          }
       }
 

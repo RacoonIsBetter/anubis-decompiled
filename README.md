@@ -101,8 +101,10 @@ ChunkVeil):
 - **Seed Block ESP** (Render): seeded xray. Give it the world seed and it runs Minecraft's own
   world generator for that seed on a private background world (no server loop, no players, a
   temporary folder under `.cache/anubis-seed-esp`), generates the chunks around you fully and
-  boxes every overworld ore it finds: diamond, emerald, gold, redstone, lapis, iron, copper and
-  coal, stone and deepslate variants (*Stone Ores* / *Deepslate Ores*), each with its own colour.
+  boxes every ore it finds: in the Overworld diamond, emerald, gold, redstone, lapis, iron, copper
+  and coal (stone and deepslate variants, *Stone Ores* / *Deepslate Ores*), in the Nether ancient
+  debris (netherite), Nether gold and Nether quartz, each with its own colour. In a tested Nether
+  chunk it predicted all 3 ancient debris the server had.
   It needs nothing from the server, so it works under the fake deepslate. The generator is ported
   from [Donut Client](https://github.com/NotRaindoots/donut-client) (MIT, notice kept in
   `VanillaOreGenerator.java`). Tested against a server world: 297 of 300 sampled positions were
@@ -112,15 +114,21 @@ ChunkVeil):
   disappears when its block is air (mined, or a cave) or exposed to air and still not the ore;
   buried blocks that ore anti-xray shows as stone or deepslate stay boxed.
 - **Sound Detector** (Base Finding): marks sounds heard with no visible player within 6 blocks,
-  i.e. someone working out of sight: containers (chests, barrels, shulkers, ender chests,
-  chiseled bookshelves, decorated pots), workstations (anvil, enchanting, grindstone, smithing,
-  brewing, crafter, respawn anchor, beacon), doors, trapdoors, fence gates, levers and buttons,
-  mining and block placing, and players themselves (hits, eating, drinking, level-ups, armour,
-  pickups, buckets, bows, and thrown pearls, potions, XP bottles and fireworks). Mob, ambient and
-  water sounds are ignored, and so are furnace crackles and note blocks (clients make the first
-  themselves; the second is usually redstone). Base Finder uses the same sounds as hidden-player
-  evidence. Anti-xray plugins can cancel these sounds inside their hidden zone (ChunkVeil does by
-  default), so it catches activity above or outside the masked layer.
+  i.e. someone working out of sight: containers (chests, copper chests, barrels, shulkers, ender
+  chests, chiseled bookshelves, decorated pots), workstations (anvil, enchanting, grindstone,
+  smithing, brewing, respawn anchor, beacon), doors, trapdoors, fence gates, levers and buttons,
+  mining, block placing (named by sound family, e.g. "stone-sounding block") and players
+  themselves (hits, eating, drinking, level-ups, armour, pickups, buckets, bows, thrown pearls,
+  potions, XP bottles and fireworks). *Base activity* (off by default) adds running machinery:
+  pistons, dispensers, crafters, copper bulbs, comparators, tripwires, note blocks, minecarts,
+  primed TNT; Base Finder counts these as a *Running machinery* signal. Container sounds next to a
+  copper golem are ignored (golems sort chests by themselves). Alerts go to chat with an optional
+  chime, a history panel lists recent detections, and a spot that alerted snoozes alerts within
+  12 blocks for a while (*Snooze Same Spot*) so farms and busy bases don't spam. Mob, ambient and
+  water sounds are ignored, and so are furnace crackles (clients make those themselves). Base
+  Finder uses the same sounds as hidden-player evidence. Anti-xray plugins can cancel these sounds
+  inside their hidden zone (ChunkVeil does by default), so it catches activity above or outside
+  the masked layer.
 
 Chunks with strongholds, ancient cities, trial chambers, dungeons and ocean monuments have the
 matching false positives suppressed. Flagged chunks get a soft tile at the depth of the

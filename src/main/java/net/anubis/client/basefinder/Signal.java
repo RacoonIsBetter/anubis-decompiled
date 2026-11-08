@@ -23,6 +23,7 @@ public enum Signal {
    UTILITY("Crafted blocks", 0.45F, 3, Group.BLOCKS),
    SURFACE_BUILD("Surface build", 0.45F, 24, Group.BLOCKS),
    NETHER_PORTAL("Lit nether portal", 0.45F, 1, Group.BLOCKS),
+   MACHINERY("Running machinery", 0.50F, 3, Group.BLOCKS),
    FARM("Buried farm", 0.45F, 4, Group.BLOCKS),
    ANIMAL_FARM("Animal farm", 0.55F, 1, Group.ENTITIES),
    REDSTONE("Redstone", 0.40F, 4, Group.BLOCKS),

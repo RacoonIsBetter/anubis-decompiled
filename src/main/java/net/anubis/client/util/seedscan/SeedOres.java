@@ -14,12 +14,14 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.registry.RegistryKey;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.World;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Where the world seed put each overworld ore. A background thread runs Minecraft's own world
+ * Where the world seed put each ore, in the Overworld or the Nether (ancient debris). A background thread runs Minecraft's own world
  * generator for the seed ({@link VanillaOreGenerator}) up to FULL chunks and reads the ores out,
  * so the positions are exact, caves and neighbour-chunk features included. It needs nothing from
  * the server, so it still works where anti-xray sends the underground as plain deepslate.
@@ -30,6 +32,7 @@ public final class SeedOres implements AutoCloseable {
    private static final Map<Block, SeedOres.Ore> TEMPLATE = new IdentityHashMap<>();
 
    private final long seed;
+   private final RegistryKey<World> dimension;
    private final Thread worker;
    private final ConcurrentLinkedQueue<Long> requests = new ConcurrentLinkedQueue<>();
    private final ConcurrentLinkedQueue<SeedOres.Result> results = new ConcurrentLinkedQueue<>();
@@ -45,23 +48,32 @@ public final class SeedOres implements AutoCloseable {
       ore(SeedOres.Type.IRON, Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE);
       ore(SeedOres.Type.COPPER, Blocks.COPPER_ORE, Blocks.DEEPSLATE_COPPER_ORE);
       ore(SeedOres.Type.COAL, Blocks.COAL_ORE, Blocks.DEEPSLATE_COAL_ORE);
+      ore(SeedOres.Type.ANCIENT_DEBRIS, Blocks.ANCIENT_DEBRIS, Blocks.ANCIENT_DEBRIS);
+      ore(SeedOres.Type.NETHER_GOLD, Blocks.NETHER_GOLD_ORE, Blocks.NETHER_GOLD_ORE);
+      ore(SeedOres.Type.NETHER_QUARTZ, Blocks.NETHER_QUARTZ_ORE, Blocks.NETHER_QUARTZ_ORE);
    }
 
    private static void ore(SeedOres.Type type, Block stone, Block deepslate) {
+      TEMPLATE.put(deepslate, new SeedOres.Ore(0L, type, stone != deepslate));
       TEMPLATE.put(stone, new SeedOres.Ore(0L, type, false));
-      TEMPLATE.put(deepslate, new SeedOres.Ore(0L, type, true));
    }
 
-   private SeedOres(long seed) {
+   private SeedOres(long seed, RegistryKey<World> dimension) {
       this.seed = seed;
+      this.dimension = dimension;
       this.worker = new Thread(this::work, "Anubis Seed Ores");
       this.worker.setDaemon(true);
       this.worker.setPriority(Thread.MIN_PRIORITY + 1);
       this.worker.start();
    }
 
-   public static SeedOres start(long seed) {
-      return new SeedOres(seed);
+   /** Overworld or Nether: the dimension whose chunks this worker generates. */
+   public static SeedOres start(long seed, RegistryKey<World> dimension) {
+      return new SeedOres(seed, dimension);
+   }
+
+   public RegistryKey<World> dimension() {
+      return this.dimension;
    }
 
    public long seed() {
@@ -117,7 +129,7 @@ public final class SeedOres implements AutoCloseable {
 
             List<SeedOres.Ore> ores = new ArrayList<>();
 
-            for (VanillaOreGenerator.Found found : generator.predict(ChunkPos.getPackedX(next), ChunkPos.getPackedZ(next), state -> TEMPLATE.containsKey(state.getBlock()))) {
+            for (VanillaOreGenerator.Found found : generator.predict(this.dimension, ChunkPos.getPackedX(next), ChunkPos.getPackedZ(next), state -> TEMPLATE.containsKey(state.getBlock()))) {
                SeedOres.Ore template = TEMPLATE.get(found.state().getBlock());
                ores.add(new SeedOres.Ore(found.pos(), template.type(), template.deepslate()));
             }
@@ -149,13 +161,22 @@ public final class SeedOres implements AutoCloseable {
 
    @Environment(EnvType.CLIENT)
    public enum Type {
-      DIAMOND,
-      EMERALD,
-      GOLD,
-      REDSTONE,
-      LAPIS,
-      IRON,
-      COPPER,
-      COAL
+      DIAMOND(false),
+      EMERALD(false),
+      GOLD(false),
+      REDSTONE(false),
+      LAPIS(false),
+      IRON(false),
+      COPPER(false),
+      COAL(false),
+      ANCIENT_DEBRIS(true),
+      NETHER_GOLD(true),
+      NETHER_QUARTZ(true);
+
+      public final boolean nether;
+
+      Type(boolean nether) {
+         this.nether = nether;
+      }
    }
 }

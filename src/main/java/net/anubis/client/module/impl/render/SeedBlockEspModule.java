@@ -90,7 +90,8 @@ public final class SeedBlockEspModule extends ClientModule {
       this.seed.privateValue();
 
       for (SeedOres.Type type : SeedOres.Type.values()) {
-         boolean on = type == SeedOres.Type.DIAMOND || type == SeedOres.Type.EMERALD || type == SeedOres.Type.GOLD || type == SeedOres.Type.REDSTONE;
+         boolean on = type == SeedOres.Type.DIAMOND || type == SeedOres.Type.EMERALD || type == SeedOres.Type.GOLD || type == SeedOres.Type.REDSTONE
+            || type == SeedOres.Type.ANCIENT_DEBRIS;
          SeedBlockEspModule.Look look = SeedBlockEspModule.Look.of(type);
          BooleanSetting setting = this.addSetting(type.name().toLowerCase(), new BooleanSetting(look.label, on));
          ColorSetting color = this.addSetting(type.name().toLowerCase() + "-color", new ColorSetting(look.label + " Colour", look.color));
@@ -142,7 +143,7 @@ public final class SeedBlockEspModule extends ClientModule {
          this.reset(level);
       }
 
-      if (level == null || mc.player == null || level.getRegistryKey() != World.OVERWORLD || !this.seedReady(level)) {
+      if (level == null || mc.player == null || level.getRegistryKey() != World.OVERWORLD && level.getRegistryKey() != World.NETHER || !this.seedReady(level)) {
          return;
       }
 
@@ -198,9 +199,9 @@ public final class SeedBlockEspModule extends ClientModule {
       }
 
       this.seedAsked = false;
-      if (this.ores == null || this.ores.seed() != wanted.getAsLong()) {
+      if (this.ores == null || this.ores.seed() != wanted.getAsLong() || this.ores.dimension() != level.getRegistryKey()) {
          this.reset(level);
-         this.ores = SeedOres.start(wanted.getAsLong());
+         this.ores = SeedOres.start(wanted.getAsLong(), level.getRegistryKey());
       }
 
       if (!this.seedChecked) {
@@ -282,7 +283,7 @@ public final class SeedBlockEspModule extends ClientModule {
 
       for (List<SeedOres.Ore> ores : this.predicted.values()) {
          for (SeedOres.Ore ore : ores) {
-            if (this.shown.get(ore.type()).get() && (ore.deepslate() ? this.deepslateOres.get() : this.stoneOres.get()) && this.stillThere(level, ore)) {
+            if (this.shown.get(ore.type()).get() && (ore.type().nether || (ore.deepslate() ? this.deepslateOres.get() : this.stoneOres.get())) && this.stillThere(level, ore)) {
                keep.add(ore.pos());
                this.layer.put(ore.pos(), new SeedBlockEspModule.Shown(ore.type()));
             }
@@ -420,7 +421,10 @@ public final class SeedBlockEspModule extends ClientModule {
       LAPIS("Lapis", 0xFF3060FF, Blocks.LAPIS_ORE, Blocks.DEEPSLATE_LAPIS_ORE),
       IRON("Iron", 0xFFD9A982, Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE),
       COPPER("Copper", 0xFFE0753E, Blocks.COPPER_ORE, Blocks.DEEPSLATE_COPPER_ORE),
-      COAL("Coal", 0xFF404040, Blocks.COAL_ORE, Blocks.DEEPSLATE_COAL_ORE);
+      COAL("Coal", 0xFF404040, Blocks.COAL_ORE, Blocks.DEEPSLATE_COAL_ORE),
+      ANCIENT_DEBRIS("Ancient Debris (Netherite)", 0xFFB4583A, Blocks.ANCIENT_DEBRIS, Blocks.ANCIENT_DEBRIS),
+      NETHER_GOLD("Nether Gold", 0xFFFFD84A, Blocks.NETHER_GOLD_ORE, Blocks.NETHER_GOLD_ORE),
+      NETHER_QUARTZ("Nether Quartz", 0xFFEDE6DA, Blocks.NETHER_QUARTZ_ORE, Blocks.NETHER_QUARTZ_ORE);
 
       final String label;
       final int color;
