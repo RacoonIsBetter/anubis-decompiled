@@ -130,6 +130,20 @@ ChunkVeil):
   inside their hidden zone (ChunkVeil does by default), so it catches activity above or outside
   the masked layer.
 
+- **Hidden Player ESP** (Base Finding): servers that hide players/mobs underground never spawn
+  them on your client, but can still leak where they are. Any entity whose position arrives
+  (position sync or moves) without it ever being spawned is boxed: red when it moves at player
+  speed (3.5+ blocks/s, tunable) and reported to Base Finder, amber for positions that only leak
+  in a snapshot (on a ChunkVeil test server, hidden mobs' positions arrive whenever you join or get
+  teleported; relogging refreshes them). In local tests ChunkVeil did not leak a hidden player
+  moving through a tunnel, so on such servers this mostly shows hidden mobs; it is meant for
+  servers that do leak movement.
+- **Leak Test** (Base Finding): a diagnostic. It logs everything the server still sends from inside
+  the hidden underground (sounds, block-break effects, mining progress, particles, block updates,
+  spawns) and every packet about entities you were never sent, to
+  `config/anubis/leak-test.log`, with a chat summary and a list of hidden entities that keep
+  getting updates. Use it on a server to see what its anti-xray leaks.
+
 Chunks with strongholds, ancient cities, trial chambers, dungeons and ocean monuments have the
 matching false positives suppressed. Flagged chunks get a soft tile at the depth of the
 evidence and a dot; aim at the dot to see why the chunk was flagged. A panel (top left by

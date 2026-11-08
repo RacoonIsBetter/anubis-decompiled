@@ -99,6 +99,8 @@ import net.anubis.client.module.impl.render.AtmosphereModule;
 import net.anubis.client.module.impl.render.BaseFinderModule;
 import net.anubis.client.module.impl.render.SeedBlockEspModule;
 import net.anubis.client.module.impl.misc.SoundDetectorModule;
+import net.anubis.client.module.impl.misc.LeakTestModule;
+import net.anubis.client.module.impl.misc.HiddenPlayerEspModule;
 import net.anubis.client.module.impl.render.BetterSusChunkModule;
 import net.anubis.client.module.impl.render.BlockEntityDebugModule;
 import net.anubis.client.module.impl.render.BlockEspModule;
@@ -245,6 +247,8 @@ public final class BuiltinModuleProvider implements ModuleProvider {
             new BaseFinderModule(),
             new SeedBlockEspModule(),
             new SoundDetectorModule(),
+            new LeakTestModule(),
+            new HiddenPlayerEspModule(),
             new ChunkScannerModule(),
             new BlockEntityDebugModule(),
             new LightEspModule(),

@@ -633,6 +633,13 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
       }
    }
 
+   /** Another module saw a player the server hides (e.g. Hidden Player ESP from leaked position updates). */
+   public void reportHiddenPlayer(BlockPos pos, String detail) {
+      if (this.scanning && this.watchingHidden()) {
+         this.markHidden(pos, 1.0F, detail, System.currentTimeMillis());
+      }
+   }
+
    private void markHidden(BlockPos pos, float strength, String detail, long now) {
       this.hidden.put(ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4), new Hidden(strength, detail, now, pos.asLong()));
       this.rankDirty = true;
