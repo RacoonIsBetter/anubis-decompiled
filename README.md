@@ -98,19 +98,19 @@ looked for on the fake flat floor.
 Two modules added for servers whose anti-xray hides the underground (DonutSMP's flat deepslate,
 ChunkVeil):
 
-- **Seed Block ESP** (Render): seeded xray. Give it the world seed and it works out where the
-  overworld ores (diamond, emerald, gold, redstone, lapis, iron, copper, coal) were generated,
-  using Anubis's own ore simulation (`util/seedscan`), and boxes them with the Block ESP
-  renderer, stone and deepslate variants alike, each ore in its own colour (changeable). It needs
-  nothing from the server, so it works under the fake deepslate. The seed is checked against the
-  world: predicted ores that touch air are real blocks anti-xray leaves alone, so it reports
-  "Seed confirmed" (26 of 30 with the right seed in testing) or "Seed looks wrong" (0 of 31 with a
-  wrong one). The seed hash the server sends at login is only a hint, since servers can fake it.
-  *Stone Ores* / *Deepslate Ores* filter by variant (the real block when visible, otherwise by
-  height). A prediction only disappears when its block is air (mined, or a cave) or exposed and
-  still not the ore; buried blocks that ore anti-xray shows as stone or deepslate stay shown. *Show Uncertain* adds
-  the dimmer guesses. In a test world 92% of
-  "certain" predictions (46 of 48 diamonds) were the real ore.
+- **Seed Block ESP** (Render): seeded xray. Give it the world seed and it runs Minecraft's own
+  world generator for that seed on a private background world (no server loop, no players, a
+  temporary folder under `.cache/anubis-seed-esp`), generates the chunks around you fully and
+  boxes every overworld ore it finds: diamond, emerald, gold, redstone, lapis, iron, copper and
+  coal, stone and deepslate variants (*Stone Ores* / *Deepslate Ores*), each with its own colour.
+  It needs nothing from the server, so it works under the fake deepslate. The generator is ported
+  from [Donut Client](https://github.com/NotRaindoots/donut-client) (MIT, notice kept in
+  `VanillaOreGenerator.java`). Tested against a server world: 297 of 300 sampled positions were
+  the real ore, and one whole chunk had 453 ore blocks with all 453 predicted. The seed is
+  checked against ores you can see that touch air ("Seed confirmed" / "Seed looks wrong"); the
+  seed hash a server sends at login is only a hint, since servers can fake it. A box only
+  disappears when its block is air (mined, or a cave) or exposed to air and still not the ore;
+  buried blocks that ore anti-xray shows as stone or deepslate stay boxed.
 - **Sound Detector** (Base Finding): marks sounds heard with no visible player within 6 blocks,
   i.e. someone working out of sight: containers (chests, barrels, shulkers, ender chests,
   chiseled bookshelves, decorated pots), workstations (anvil, enchanting, grindstone, smithing,

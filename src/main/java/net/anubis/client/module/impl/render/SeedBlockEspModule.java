@@ -34,17 +34,16 @@ import net.minecraft.world.World;
 import net.minecraft.world.gen.GeneratorOptions;
 
 /**
- * Seeded xray: with the world seed it works out where the overworld ores were generated and boxes
- * them, so ores still show where anti-xray sends the underground as plain deepslate. Once the real
- * blocks around a prediction are visible, mined-out ores and ones the seed model got wrong (caves it
- * doesn't model) are hidden.
+ * Seeded xray: with the world seed, Minecraft's own world generator (run privately on a background
+ * thread, see {@link SeedOres}) produces the overworld ores exactly where the server generated
+ * them, and they are boxed even where anti-xray sends the underground as plain deepslate. A box
+ * only goes away when its block is air (mined, cave) or exposed to air and still not the ore.
  */
 @Environment(EnvType.CLIENT)
 public final class SeedBlockEspModule extends ClientModule {
    private static final int SEED_SETTLE_TICKS = 20;
    private static final int REQUEST_EVERY_TICKS = 20;
    private static final int RECHECK_EVERY_TICKS = 40;
-   private static final int DEEPSLATE_SPLIT_Y = 4;
    /** Visible ores needed before the seed is judged; a wrong seed matches almost none, the right one most. */
    private static final int VERIFY_SAMPLES = 30;
    private static final float VERIFY_PASS = 0.5F;
@@ -56,16 +55,15 @@ public final class SeedBlockEspModule extends ClientModule {
    private final Map<SeedOres.Type, ColorSetting> colors = new EnumMap<>(SeedOres.Type.class);
    private final BooleanSetting stoneOres = this.addSetting("stone-ores", new BooleanSetting("Stone Ores", true));
    private final BooleanSetting deepslateOres = this.addSetting("deepslate-ores", new BooleanSetting("Deepslate Ores", true));
-   private final BooleanSetting uncertain = this.addSetting("uncertain", new BooleanSetting("Show Uncertain", true));
    private final BooleanSetting hideMissing = this.addSetting("hide-missing", new BooleanSetting("Hide Mined / Missing", true));
    private final BooleanSetting tracers = this.addSetting("tracers", new BooleanSetting("Tracers", false));
-   private final EspStyle style = new EspStyle(this::addSetting, "Outline", 0.25F, 256.0F);
+   private final EspStyle style = new EspStyle(this::addSetting, "Outline", 0.25F, 512.0F);
    private final BlockLayer layer = new BlockLayer(new BlockLayer.Palette() {
       @Override
       public int color(Object kind) {
          SeedBlockEspModule.Shown shown = (SeedBlockEspModule.Shown)kind;
          int color = SeedBlockEspModule.this.colors.get(shown.ore()).argb();
-         return shown.certain() ? color : color & 0x00FFFFFF | 0x70000000;
+         return color;
       }
 
       @Override
@@ -104,7 +102,6 @@ public final class SeedBlockEspModule extends ClientModule {
          this.colors.put(type, color);
       }
 
-      this.uncertain.onChange(this::redraw);
       this.stoneOres.onChange(this::redraw);
       this.deepslateOres.onChange(this::redraw);
       this.hideMissing.onChange(this::redraw);
@@ -285,10 +282,9 @@ public final class SeedBlockEspModule extends ClientModule {
 
       for (List<SeedOres.Ore> ores : this.predicted.values()) {
          for (SeedOres.Ore ore : ores) {
-            if (this.shown.get(ore.type()).get() && (ore.certain() || this.uncertain.get())
-               && (deepslate(level, ore) ? this.deepslateOres.get() : this.stoneOres.get()) && this.stillThere(level, ore)) {
+            if (this.shown.get(ore.type()).get() && (ore.deepslate() ? this.deepslateOres.get() : this.stoneOres.get()) && this.stillThere(level, ore)) {
                keep.add(ore.pos());
-               this.layer.put(ore.pos(), new SeedBlockEspModule.Shown(ore.type(), ore.certain()));
+               this.layer.put(ore.pos(), new SeedBlockEspModule.Shown(ore.type()));
             }
          }
       }
@@ -318,10 +314,6 @@ public final class SeedBlockEspModule extends ClientModule {
 
       for (List<SeedOres.Ore> ores : this.predicted.values()) {
          for (SeedOres.Ore ore : ores) {
-            if (!ore.certain()) {
-               continue;
-            }
-
             BlockPos pos = BlockPos.fromLong(ore.pos());
             if (!LevelUtil.isLoaded(level, pos.getX() >> 4, pos.getZ() >> 4)) {
                continue;
@@ -405,20 +397,6 @@ public final class SeedBlockEspModule extends ClientModule {
       return false;
    }
 
-   /**
-    * Deepslate or stone variant: what the client shows when it is the ore, else by height (all
-    * deepslate below Y=0, all stone from Y=8, split halfway through the blend in between).
-    */
-   private static boolean deepslate(ClientWorld level, SeedOres.Ore ore) {
-      BlockPos pos = BlockPos.fromLong(ore.pos());
-      Block shown = level.getBlockState(pos).getBlock();
-      SeedBlockEspModule.Look look = SeedBlockEspModule.Look.of(ore.type());
-      if (look.matches(shown)) {
-         return shown == look.deepslate;
-      }
-
-      return pos.getY() < DEEPSLATE_SPLIT_Y;
-   }
 
    @EventHandler
    public void onRender3D(Render3DEvent event) {
@@ -429,7 +407,7 @@ public final class SeedBlockEspModule extends ClientModule {
    }
 
    @Environment(EnvType.CLIENT)
-   private record Shown(SeedOres.Type ore, boolean certain) {
+   private record Shown(SeedOres.Type ore) {
    }
 
    /** Default colour, setting label and the real blocks of each ore: both the stone and the deepslate variant count. */
