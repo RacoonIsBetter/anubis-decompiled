@@ -97,6 +97,8 @@ import net.anubis.client.module.impl.movement.SprintModule;
 import net.anubis.client.module.impl.movement.TridentBoostModule;
 import net.anubis.client.module.impl.render.AtmosphereModule;
 import net.anubis.client.module.impl.render.BaseFinderModule;
+import net.anubis.client.module.impl.render.SeedBlockEspModule;
+import net.anubis.client.module.impl.misc.SoundDetectorModule;
 import net.anubis.client.module.impl.render.BetterSusChunkModule;
 import net.anubis.client.module.impl.render.BlockEntityDebugModule;
 import net.anubis.client.module.impl.render.BlockEspModule;
@@ -241,6 +243,8 @@ public final class BuiltinModuleProvider implements ModuleProvider {
             new SusChunkFinderModule(),
             new BetterSusChunkModule(),
             new BaseFinderModule(),
+            new SeedBlockEspModule(),
+            new SoundDetectorModule(),
             new ChunkScannerModule(),
             new BlockEntityDebugModule(),
             new LightEspModule(),

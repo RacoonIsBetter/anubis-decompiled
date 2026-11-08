@@ -16,6 +16,7 @@ import net.anubis.client.basefinder.BaseEvidenceScanner;
 import net.anubis.client.basefinder.BaseFinderEntry;
 import net.anubis.client.basefinder.BaseFinderHud;
 import net.anubis.client.basefinder.ChunkReport;
+import net.anubis.client.basefinder.HeardSound;
 import net.anubis.client.basefinder.Signal;
 import net.anubis.client.chat.ModuleChat;
 import net.anubis.client.event.EventHandler;
@@ -285,6 +286,7 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
    @EventHandler
    public void onPacketReceive(PacketReceiveEvent event) {
       if (this.scanning && this.watchingHidden()) {
+         this.heard(event);
          if (event.packet instanceof BlockBreakingProgressS2CPacket progress) {
             this.pendingBreakers.add(progress.getPos().asLong());
             this.pendingBreakers.add(progress.getEntityId());
@@ -295,6 +297,25 @@ public final class BaseFinderModule extends ClientModule implements HudOverlayPr
                this.pendingOpens.add(blockEvent.getPos().asLong());
             }
          }
+      }
+   }
+
+   /** Player-made sounds nobody visible made (same filter as Sound Detector): chests and workstations pin a player, mining and building count as digging. */
+   private void heard(PacketReceiveEvent event) {
+      ClientWorld level = MinecraftClient.getInstance().world;
+      HeardSound heard = level == null ? null : HeardSound.classify(event.packet, level);
+      if (heard == null) {
+         return;
+      }
+
+      long pos = heard.blockPos().asLong();
+      if (heard.kind() == HeardSound.Kind.MINING || heard.kind() == HeardSound.Kind.BUILDING) {
+         // The block update for the same block may already be counted.
+         if (!this.pendingChanges.contains(pos)) {
+            this.pendingChanges.add(pos);
+         }
+      } else {
+         this.markHidden(heard.blockPos(), 1.0F, "heard " + heard.what() + " out of sight", System.currentTimeMillis());
       }
    }
 

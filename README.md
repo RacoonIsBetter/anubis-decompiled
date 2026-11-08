@@ -71,7 +71,7 @@ Each loaded chunk gets a probability from independent signals:
 | Signal | What it means |
 |---|---|
 | Player underground | Another player is (or recently was) well below the surface here |
-| Hidden player activity | A player you can't see, at any depth: the server reports someone mining a block but never sent you that player, or blocks keep being dug/placed/used (doors, trapdoors, gates, barrels, levers) underground with no visible player within 8 blocks (explosions, fluids, falling blocks and growth are ignored). In the overworld also Player Bypass's inference: chunks outside your simulation distance keep ticking, or a hidden player hit a mob / picked up an item. Toggle **Hidden Players** |
+| Hidden player activity | A player you can't see, at any depth: the server reports someone mining a block but never sent you that player, a chest/workstation/door is heard with nobody visible nearby, or blocks keep being dug/placed/used (doors, trapdoors, gates, barrels, levers) underground with no visible player within 8 blocks (explosions, fluids, falling blocks and growth are ignored). In the overworld also Player Bypass's inference: chunks outside your simulation distance keep ticking, or a hidden player hit a mob / picked up an item. Toggle **Hidden Players** |
 | Player storage | Shulkers, ender chests, buried chests/barrels (lone ones on the surface count once, so scattered junk doesn't inflate a chunk) |
 | Surface build | Concrete, stained glass, quartz or metal blocks lined up 3+ in a row above ground (walls, floors, pillars); single scattered blocks are ignored |
 | Item frames / armor stands | Item frames, glow frames, armor stands and paintings (only players place these) |
@@ -92,6 +92,25 @@ On servers that hide the underground below Y=0 as flat deepslate (DonutSMP and p
 ChunkVeil), those chunks are recognised: the panel says how many loaded chunks have their
 underground hidden, block changes there aren't treated as digging, and rooms/tunnels aren't
 looked for on the fake flat floor.
+
+## Seed Block ESP and Sound Detector (`anubis-modded` branch)
+
+Two modules added for servers whose anti-xray hides the underground (DonutSMP's flat deepslate,
+ChunkVeil):
+
+- **Seed Block ESP** (Render): seeded xray. Give it the world seed and it works out where the
+  overworld ores (diamond, emerald, gold, redstone, lapis, iron, copper, coal) were generated,
+  using Anubis's own ore simulation (`util/seedscan`), and boxes them with the Block ESP
+  renderer. It needs nothing from the server, so it works under the fake deepslate. It checks
+  the seed against the hashed seed the server sends and warns when they differ. Once the real
+  blocks are visible, mined ores and predictions the seed model got wrong (it doesn't model
+  carver caves) are hidden; *Show Uncertain* adds the dimmer guesses. In a test world 92% of
+  "certain" predictions (46 of 48 diamonds) were the real ore.
+- **Sound Detector** (Base Finding): marks chests, barrels, shulkers, workstations (anvil,
+  enchanting, brewing...), doors, mining and building that were heard with no visible player
+  within 6 blocks: someone working out of sight. Base Finder uses the same sounds as hidden-player
+  evidence. Anti-xray plugins can cancel these sounds inside their hidden zone (ChunkVeil does by
+  default), so it catches activity above or outside the masked layer.
 
 Chunks with strongholds, ancient cities, trial chambers, dungeons and ocean monuments have the
 matching false positives suppressed. Flagged chunks get a soft tile at the depth of the
