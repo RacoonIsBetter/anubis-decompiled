@@ -18,6 +18,14 @@ The previous release, 0.9.9.1, is in this repository's history.
   The exact Fabric API module and imgui-java 1.90.0 versions from the original
   `META-INF/jars` are pulled from Maven and bundled with `include`.
 
+## Branches
+
+- **`main`** (this branch): the plain decompiled Anubis source, nothing added. Builds the same
+  mod as the original jar (releases `v1.0-decompiled`, `v0.9.9.1-decompiled`).
+- **`anubis-modded`**: `main` plus added modules (Base Finder improvements, Seed Block ESP,
+  Sound Detector, Donut Sound Detector, Hidden Player ESP, Leak Test). Its releases are
+  `v1.0-basefinder*` and `v1.0-donut-sound*`.
+
 ## Building
 
 Needs a JDK 21+ (the code targets Java 21).
