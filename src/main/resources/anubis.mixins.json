@@ -151,7 +151,11 @@
     "MixinTridentItem",
     "MixinVisGraph",
     "MixinWeaponInspectItemInHandRenderer",
-    "MixinWindow"
+    "MixinWindow",
+    "SoundDetectorClientSoundMixin",
+    "SoundDetectorLocalMixin",
+    "SoundDetectorPacketMixin",
+    "SoundEntityEventAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -113,22 +113,26 @@ ChunkVeil):
   seed hash a server sends at login is only a hint, since servers can fake it. A box only
   disappears when its block is air (mined, or a cave) or exposed to air and still not the ore;
   buried blocks that ore anti-xray shows as stone or deepslate stay boxed.
-- **Sound Detector** (Base Finding): marks sounds heard with no visible player within 6 blocks,
-  i.e. someone working out of sight: containers (chests, copper chests, barrels, shulkers, ender
-  chests, chiseled bookshelves, decorated pots), workstations (anvil, enchanting, grindstone,
-  smithing, brewing, respawn anchor, beacon), doors, trapdoors, fence gates, levers and buttons,
-  mining, block placing (named by sound family, e.g. "stone-sounding block") and players
-  themselves (hits, eating, drinking, level-ups, armour, pickups, buckets, bows, thrown pearls,
-  potions, XP bottles and fireworks). *Base activity* (off by default) adds running machinery:
-  pistons, dispensers, crafters, copper bulbs, comparators, tripwires, note blocks, minecarts,
-  primed TNT; Base Finder counts these as a *Running machinery* signal. Container sounds next to a
-  copper golem are ignored (golems sort chests by themselves). Alerts go to chat with an optional
-  chime, a history panel lists recent detections, and a spot that alerted snoozes alerts within
-  12 blocks for a while (*Snooze Same Spot*) so farms and busy bases don't spam. Mob, ambient and
-  water sounds are ignored, and so are furnace crackles (clients make those themselves). Base
-  Finder uses the same sounds as hidden-player evidence. Anti-xray plugins can cancel these sounds
-  inside their hidden zone (ChunkVeil does by default), so it catches activity above or outside
-  the masked layer.
+- **Sound Detector** (Base Finding): a one-to-one port of the Sound Detector from
+  [Donut Client 3.0](https://github.com/Raindots/donut-client) (MIT, notice in
+  `licenses/donut-client-MIT.txt`). It reads every sound, entity sound, block event (chest /
+  ender chest / shulker openers, pistons, note blocks, bells), world event (dispensers, crafters,
+  anvils, grindstones, smithing, lecterns, jukeboxes, block breaks, waxing, brushing, composters,
+  brewing, sculk, vaults / trial spawners), mining progress, entity status (deaths, totems, eating,
+  fireworks), damage, explosion and stop-sound packet, classifies it against all 1,791 vanilla
+  sound events and every block's material sounds, and scores it into incidents in 14 categories
+  (containers, workstations, building, switches, machinery, music, movement, combat, transport,
+  explosions, farming, sculk, natural, custom). Your own and probably-your-own actions, known mobs
+  and trusted players are filtered. Warnings (50+ points) and criticals (85+) show as warning
+  cards, a chime, optional chat notices and world markers. It has presets (Balanced activity,
+  Players only, Base activity, Diagnostics), custom rules with wildcard/tag filters and condition
+  groups, expected areas, per-server profiles, an activity history with an evidence inspector,
+  snooze/acknowledge/mute (with keybinds), JSON import/export and a block/sound coverage export.
+  The module settings mirror Donut's main settings page; *All Appearance, Audio And Behavior
+  Controls* opens every preference. Preferences are saved to `config/anubis/sound-detector.json`.
+  Every Donut indicator is kept, even ones some anti-xray plugins block: ChunkVeil cancels
+  positional sounds inside its hidden zone by default, so there only activity above or outside the
+  masked layer comes through. Base Finder keeps its own sound evidence.
 
 - **Hidden Player ESP** (Base Finding): servers that hide players/mobs underground never spawn
   them on your client, but can still leak where they are. Any entity whose position arrives
