@@ -32,7 +32,7 @@ public final class SoundDetectorConfig {
         return instance;
     }
 
-    private static Path file() { return FabricLoader.getInstance().getConfigDir().resolve("anubis").resolve("sound-detector.json"); }
+    private static Path file() { return FabricLoader.getInstance().getConfigDir().resolve("anubis").resolve("donut-sound-detector.json"); }
 
     private void load() {
         Path path = file();

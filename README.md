@@ -18,6 +18,14 @@ The previous release, 0.9.9.1, is in this repository's history.
   The exact Fabric API module and imgui-java 1.90.0 versions from the original
   `META-INF/jars` are pulled from Maven and bundled with `include`.
 
+## Branches
+
+- **`main`**: the plain decompiled Anubis source, nothing added. Builds the same mod as the
+  original jar (releases `v1.0-decompiled`, `v0.9.9.1-decompiled`).
+- **`anubis-modded`** (this branch): `main` plus the added modules: Base Finder improvements,
+  Seed Block ESP (seeded xray), Sound Detector, Donut Sound Detector, Hidden Player ESP and Leak
+  Test (releases `v1.0-basefinder*`, `v1.0-donut-sound*`).
+
 ## Building
 
 Needs a JDK 21+ (the code targets Java 21).
@@ -93,7 +101,7 @@ ChunkVeil), those chunks are recognised: the panel says how many loaded chunks h
 underground hidden, block changes there aren't treated as digging, and rooms/tunnels aren't
 looked for on the fake flat floor.
 
-## Seed Block ESP and Sound Detector (`anubis-modded` branch)
+## Seed Block ESP, Sound Detectors, Hidden Player ESP and Leak Test (`anubis-modded` branch)
 
 Two modules added for servers whose anti-xray hides the underground (DonutSMP's flat deepslate,
 ChunkVeil):
@@ -113,7 +121,23 @@ ChunkVeil):
   seed hash a server sends at login is only a hint, since servers can fake it. A box only
   disappears when its block is air (mined, or a cave) or exposed to air and still not the ore;
   buried blocks that ore anti-xray shows as stone or deepslate stay boxed.
-- **Sound Detector** (Base Finding): a one-to-one port of the Sound Detector from
+- **Sound Detector** (Base Finding): marks sounds heard with no visible player within 6 blocks,
+  i.e. someone working out of sight: containers (chests, copper chests, barrels, shulkers, ender
+  chests, chiseled bookshelves, decorated pots), workstations (anvil, enchanting, grindstone,
+  smithing, brewing, respawn anchor, beacon), doors, trapdoors, fence gates, levers and buttons,
+  mining, block placing (named by sound family, e.g. "stone-sounding block") and players
+  themselves (hits, eating, drinking, level-ups, armour, pickups, buckets, bows, thrown pearls,
+  potions, XP bottles and fireworks). *Base activity* (off by default) adds running machinery:
+  pistons, dispensers, crafters, copper bulbs, comparators, tripwires, note blocks, minecarts,
+  primed TNT; Base Finder counts these as a *Running machinery* signal. Container sounds next to a
+  copper golem are ignored (golems sort chests by themselves). Alerts go to chat with an optional
+  chime, a history panel lists recent detections, and a spot that alerted snoozes alerts within
+  12 blocks for a while (*Snooze Same Spot*) so farms and busy bases don't spam. Mob, ambient and
+  water sounds are ignored, and so are furnace crackles (clients make those themselves). Base
+  Finder uses the same sounds as hidden-player evidence. Anti-xray plugins can cancel these sounds
+  inside their hidden zone (ChunkVeil does by default), so it catches activity above or outside
+  the masked layer.
+- **Donut Sound Detector** (Base Finding): a separate module, a one-to-one port of the Sound Detector from
   [Donut Client 3.0](https://github.com/Raindots/donut-client) (MIT, notice in
   `licenses/donut-client-MIT.txt`). It reads every sound, entity sound, block event (chest /
   ender chest / shulker openers, pistons, note blocks, bells), world event (dispensers, crafters,
@@ -129,10 +153,10 @@ ChunkVeil):
   groups, expected areas, per-server profiles, an activity history with an evidence inspector,
   snooze/acknowledge/mute (with keybinds), JSON import/export and a block/sound coverage export.
   The module settings mirror Donut's main settings page; *All Appearance, Audio And Behavior
-  Controls* opens every preference. Preferences are saved to `config/anubis/sound-detector.json`.
+  Controls* opens every preference. Preferences are saved to `config/anubis/donut-sound-detector.json`.
   Every Donut indicator is kept, even ones some anti-xray plugins block: ChunkVeil cancels
   positional sounds inside its hidden zone by default, so there only activity above or outside the
-  masked layer comes through. Base Finder keeps its own sound evidence.
+  masked layer comes through. It runs independently of the Sound Detector above; Base Finder keeps its own sound evidence.
 
 - **Hidden Player ESP** (Base Finding): servers that hide players/mobs underground never spawn
   them on your client, but can still leak where they are. Any entity whose position arrives

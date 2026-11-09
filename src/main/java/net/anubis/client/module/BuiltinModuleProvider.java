@@ -98,6 +98,7 @@ import net.anubis.client.module.impl.movement.TridentBoostModule;
 import net.anubis.client.module.impl.render.AtmosphereModule;
 import net.anubis.client.module.impl.render.BaseFinderModule;
 import net.anubis.client.module.impl.render.SeedBlockEspModule;
+import net.anubis.client.module.impl.misc.DonutSoundDetectorModule;
 import net.anubis.client.module.impl.misc.SoundDetectorModule;
 import net.anubis.client.module.impl.misc.LeakTestModule;
 import net.anubis.client.module.impl.misc.HiddenPlayerEspModule;
@@ -247,6 +248,7 @@ public final class BuiltinModuleProvider implements ModuleProvider {
             new BaseFinderModule(),
             new SeedBlockEspModule(),
             new SoundDetectorModule(),
+            new DonutSoundDetectorModule(),
             new LeakTestModule(),
             new HiddenPlayerEspModule(),
             new ChunkScannerModule(),
